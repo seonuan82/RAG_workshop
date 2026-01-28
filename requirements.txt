@@ -4,7 +4,6 @@
 numpy>=1.24.0
 python-dotenv>=1.0.0
 streamlit>=1.30.0
-datasets>=2.14.0             # Hugging Face Datasets (KorQuAD 로드용)
 
 # LLM APIs (둘 중 하나만 설치해도 됨)
 google-generativeai>=0.5.0   # Gemini

@@ -101,42 +101,58 @@ class Document:
     questions: list[dict]  # [{"question": "...", "answer": "..."}]
 
 
-def load_korquad_from_huggingface(max_docs: Optional[int] = None) -> list[Document]:
-    """Hugging Face에서 KorQuAD 2.1 데이터 로드 (Streamlit Cloud용)"""
-    from datasets import load_dataset
+def load_korquad_from_github(max_docs: Optional[int] = None) -> list[Document]:
+    """GitHub에서 KorQuAD 2.1 데이터 직접 다운로드 (Streamlit Cloud용)"""
+    import urllib.request
+    import zipfile
+    import tempfile
 
-    # KorQuAD 2.1 로드
-    dataset = load_dataset("squad_kor_v2.py", split="train")
+    # KorQuAD 2.1 GitHub URL (train_00만 사용 - 실습용으로 충분)
+    url = "https://github.com/korquad/korquad.github.io/raw/master/dataset/KorQuAD_2.1/train/KorQuAD_2.1_train_00.zip"
 
     documents = []
-    seen_contexts = set()  # 중복 제거용 (같은 context에 여러 QA가 있음)
 
-    for idx, item in enumerate(dataset):
-        if max_docs and len(documents) >= max_docs:
-            break
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # ZIP 다운로드
+        zip_path = os.path.join(tmpdir, "korquad.zip")
+        print("   GitHub에서 다운로드 중...")
+        urllib.request.urlretrieve(url, zip_path)
 
-        context = item['context']
+        # ZIP 압축 해제
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(tmpdir)
 
-        # 중복 컨텍스트 스킵 (같은 문서에 여러 질문이 있을 수 있음)
-        context_hash = hash(context[:200])
-        if context_hash in seen_contexts:
-            continue
-        seen_contexts.add(context_hash)
+        # JSON 파일 찾기
+        json_files = [f for f in os.listdir(tmpdir) if f.endswith('.json')]
+        if not json_files:
+            raise FileNotFoundError("ZIP 파일에서 JSON을 찾을 수 없습니다")
 
-        # HTML 태그 제거 (KorQuAD 2.1은 HTML 포함)
-        clean_content = strip_html_tags(context) if '<' in context else context
+        json_path = os.path.join(tmpdir, json_files[0])
 
-        doc = Document(
-            doc_id=f"doc_{len(documents)}",
-            title=item.get('title', f"문서_{len(documents)}"),
-            url=item.get('url', ""),
-            content=clean_content,
-            questions=[{
-                "question": item['question'],
-                "answer": item['answer']['text']  # answer (단수), text 직접 접근
-            }]
-        )
-        documents.append(doc)
+        # JSON 로드
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        items = data['data'][:max_docs] if max_docs else data['data']
+
+        for idx, item in enumerate(items):
+            clean_content = strip_html_tags(item['context'])
+
+            questions = []
+            for qa in item.get('qas', []):
+                questions.append({
+                    "question": qa['question'],
+                    "answer": qa['answer']['text']
+                })
+
+            doc = Document(
+                doc_id=f"doc_{idx}",
+                title=item['title'],
+                url=item.get('url', ''),
+                content=clean_content,
+                questions=questions
+            )
+            documents.append(doc)
 
     return documents
 
@@ -177,16 +193,15 @@ def load_korquad_data(filepath: Optional[str] = None, max_docs: Optional[int] = 
     """
     KorQuAD 데이터 로드 (자동 선택)
     - 로컬 파일이 있으면 JSON에서 로드
-    - 없으면 Hugging Face에서 로드
+    - 없으면 GitHub에서 직접 다운로드
     """
     # 로컬 파일 확인
     if filepath and os.path.exists(filepath):
         print(f"   로컬 파일에서 로드: {filepath}")
         return load_korquad_from_json(filepath, max_docs)
 
-    # Hugging Face에서 로드
-    print("   Hugging Face에서 로드 중...")
-    return load_korquad_from_huggingface(max_docs)
+    # GitHub에서 직접 다운로드
+    return load_korquad_from_github(max_docs)
 
 
 # === 텍스트 청킹 ===
