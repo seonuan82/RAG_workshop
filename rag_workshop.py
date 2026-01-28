@@ -5,9 +5,14 @@ RAG Workshop - KorQuAD 2.1 기반 실습
 이 모듈은 KorQuAD 2.1 데이터셋을 활용한 RAG(Retrieval-Augmented Generation) 실습을 위한 코드입니다.
 
 사용법:
+    [로컬 실행]
     1. .env 파일에 API 키 설정
     2. config에서 원하는 LLM 선택 (gemini 또는 openai)
     3. main() 실행
+
+    [Streamlit Cloud 배포]
+    1. Streamlit Cloud의 Secrets에 API 키 설정
+    2. streamlit run app.py 실행
 """
 
 import json
@@ -17,6 +22,24 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Optional
+
+
+# === API 키 관리 ===
+def get_secret(key: str) -> Optional[str]:
+    """
+    API 키를 가져옵니다.
+    우선순위: Streamlit secrets > 환경변수 > None
+    """
+    # 1. Streamlit secrets 시도
+    try:
+        import streamlit as st
+        if key in st.secrets:
+            return st.secrets[key]
+    except (ImportError, Exception):
+        pass
+
+    # 2. 환경변수 fallback
+    return os.getenv(key)
 
 # === 설정 ===
 @dataclass
@@ -176,9 +199,9 @@ class GeminiLLM(BaseLLM):
     def __init__(self, model: str = "gemini-1.5-flash"):
         import google.generativeai as genai
 
-        api_key = os.getenv("GOOGLE_API_KEY")
+        api_key = get_secret("GOOGLE_API_KEY")
         if not api_key:
-            raise ValueError("GOOGLE_API_KEY 환경변수를 설정하세요")
+            raise ValueError("GOOGLE_API_KEY를 설정하세요 (Streamlit secrets 또는 환경변수)")
 
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel(model)
@@ -203,9 +226,9 @@ class OpenAILLM(BaseLLM):
     def __init__(self, model: str = "gpt-4o-mini", embedding_model: str = "text-embedding-3-small"):
         from openai import OpenAI
 
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = get_secret("OPENAI_API_KEY")
         if not api_key:
-            raise ValueError("OPENAI_API_KEY 환경변수를 설정하세요")
+            raise ValueError("OPENAI_API_KEY를 설정하세요 (Streamlit secrets 또는 환경변수)")
 
         self.client = OpenAI(api_key=api_key)
         self.model = model
@@ -443,17 +466,75 @@ def main():
     print("\n4. 문서 인덱싱 중...")
     rag.index_documents(chunks)
 
-    # 6. 테스트 쿼리
-    print("\n5. 테스트 쿼리 실행...")
+    # 6. 인터랙티브 실습 메뉴
+    print("\n" + "="*50)
+    print("RAG 실습 준비 완료!")
+    print("="*50)
 
-    # 데이터에서 샘플 질문 사용
-    sample_questions = [doc.questions[0]['question'] for doc in documents[:3] if doc.questions]
+    while True:
+        print("\n[실습 메뉴]")
+        print("1. 자유 질문하기")
+        print("2. 샘플 질문 테스트 (데이터셋 기반)")
+        print("3. 청크 크기 비교 실험")
+        print("4. RAG 정확도 평가")
+        print("5. 종료")
 
-    for q in sample_questions:
-        print(f"\n질문: {q}")
-        result = rag.query(q)
-        print(f"답변: {result['answer']}")
-        print(f"참조 문서: {[s['title'] for s in result['sources']]}")
+        choice = input("\n선택 (1-5): ").strip()
+
+        if choice == "1":
+            question = input("질문을 입력하세요: ").strip()
+            if question:
+                result = rag.query(question)
+                print(f"\n[답변]\n{result['answer']}")
+                print(f"\n[참조 문서]")
+                for s in result['sources']:
+                    print(f"  - {s['title']}: {s['content'][:100]}...")
+
+        elif choice == "2":
+            sample_questions = [doc.questions[0]['question'] for doc in documents[:5] if doc.questions]
+            print("\n[샘플 질문 목록]")
+            for i, q in enumerate(sample_questions):
+                print(f"  {i+1}. {q}")
+
+            idx = input("번호 선택: ").strip()
+            if idx.isdigit() and 1 <= int(idx) <= len(sample_questions):
+                q = sample_questions[int(idx)-1]
+                result = rag.query(q)
+                print(f"\n질문: {q}")
+                print(f"답변: {result['answer']}")
+                print(f"참조: {[s['title'] for s in result['sources']]}")
+
+        elif choice == "3":
+            test_q = input("비교할 질문 입력 (Enter시 샘플 사용): ").strip()
+            if not test_q:
+                test_q = documents[0].questions[0]['question'] if documents[0].questions else "한국의 수도는?"
+
+            compare_chunk_sizes(
+                documents[:20],  # 실험용 20개만
+                llm,
+                chunk_sizes=[200, 500, 1000],
+                test_question=test_q
+            )
+
+        elif choice == "4":
+            print("\n평가 중... (시간이 걸릴 수 있습니다)")
+            eval_result = evaluate_rag(rag, documents, num_samples=5)
+            print(f"\n[평가 결과]")
+            print(f"정확도: {eval_result['accuracy']:.1%} ({eval_result['correct']}/{eval_result['total']})")
+            print("\n[상세 결과]")
+            for r in eval_result['results']:
+                status = "✓" if r['correct'] else "✗"
+                print(f"{status} Q: {r['question']}")
+                print(f"   정답: {r['ground_truth']}")
+                print(f"   예측: {r['predicted'][:100]}...")
+                print()
+
+        elif choice == "5":
+            print("종료합니다.")
+            break
+
+        else:
+            print("잘못된 선택입니다.")
 
 
 if __name__ == "__main__":
