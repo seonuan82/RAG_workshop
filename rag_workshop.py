@@ -321,13 +321,30 @@ class OpenAILLM(BaseLLM):
 
 
 def create_llm(config: Config) -> BaseLLM:
-    """설정에 따라 LLM 인스턴스 생성"""
-    if config.llm_provider == "gemini":
+    """
+    LLM 인스턴스 생성 (자동 선택)
+    우선순위: GOOGLE_API_KEY > OPENAI_API_KEY
+    """
+    google_key = get_secret("GOOGLE_API_KEY")
+    openai_key = get_secret("OPENAI_API_KEY")
+
+    # 1. Google API 키가 있으면 Gemini 사용
+    if google_key:
+        print(f"   Gemini API 사용 ({config.gemini_model})")
         return GeminiLLM(model=config.gemini_model)
-    elif config.llm_provider == "openai":
+
+    # 2. OpenAI API 키가 있으면 GPT 사용
+    if openai_key:
+        print(f"   OpenAI API 사용 ({config.openai_model})")
         return OpenAILLM(model=config.openai_model, embedding_model=config.embedding_model)
-    else:
-        raise ValueError(f"지원하지 않는 LLM provider: {config.llm_provider}")
+
+    # 3. 둘 다 없으면 에러
+    raise ValueError(
+        "API 키를 설정하세요.\n"
+        "- GOOGLE_API_KEY (Gemini)\n"
+        "- OPENAI_API_KEY (GPT)\n"
+        "Streamlit secrets 또는 환경변수로 설정 가능합니다."
+    )
 
 
 # === 벡터 검색 (간단한 구현) ===
