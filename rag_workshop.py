@@ -106,7 +106,7 @@ def load_korquad_from_huggingface(max_docs: Optional[int] = None) -> list[Docume
     from datasets import load_dataset
 
     # KorQuAD 2.1 로드
-    dataset = load_dataset("squad_kor_v2", split="train")
+    dataset = load_dataset("squad_kor_v2.py", split="train")
 
     documents = []
     seen_contexts = set()  # 중복 제거용 (같은 context에 여러 QA가 있음)
