@@ -49,8 +49,8 @@ class Config:
     llm_provider: str = "gemini"
 
     # 모델명 (각 provider별)
-    gemini_model: str = "gemini-1.5-flash"
-    openai_model: str = "gpt-4o-mini"
+    gemini_model: str = "gemini-2.5-flash"
+    openai_model: str = "gpt-5"
 
     # 임베딩 설정
     embedding_model: str = "text-embedding-3-small"  # OpenAI 임베딩
@@ -102,32 +102,20 @@ class Document:
 
 
 def load_korquad_from_github(max_docs: Optional[int] = None) -> list[Document]:
-    """GitHub에서 KorQuAD 2.1 데이터 직접 다운로드 (Streamlit Cloud용)"""
+    """GitHub에서 KorQuAD 데이터 직접 다운로드 (Streamlit Cloud용)"""
     import urllib.request
-    import zipfile
     import tempfile
 
-    # KorQuAD 2.1 GitHub URL (train_00만 사용 - 실습용으로 충분)
-    url = "https://github.com/korquad/korquad.github.io/raw/master/dataset/KorQuAD_2.1/train/KorQuAD_2.1_train_00.zip"
+    # MY_GITHUB에서 korquad_half.json 다운로드
+    url = "https://raw.githubusercontent.com/seonuan82/RAG_Workshop/main/korquad_div9.json"
 
     documents = []
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        # ZIP 다운로드
-        zip_path = os.path.join(tmpdir, "korquad.zip")
+        # JSON 다운로드
+        json_path = os.path.join(tmpdir, "korquad_div9.json")
         print("   GitHub에서 다운로드 중...")
-        urllib.request.urlretrieve(url, zip_path)
-
-        # ZIP 압축 해제
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(tmpdir)
-
-        # JSON 파일 찾기
-        json_files = [f for f in os.listdir(tmpdir) if f.endswith('.json')]
-        if not json_files:
-            raise FileNotFoundError("ZIP 파일에서 JSON을 찾을 수 없습니다")
-
-        json_path = os.path.join(tmpdir, json_files[0])
+        urllib.request.urlretrieve(url, json_path)
 
         # JSON 로드
         with open(json_path, 'r', encoding='utf-8') as f:
@@ -265,36 +253,38 @@ class BaseLLM(ABC):
 
 
 class GeminiLLM(BaseLLM):
-    """Google Gemini API"""
+    """Google Gemini API (new SDK)"""
 
-    def __init__(self, model: str = "gemini-1.5-flash"):
-        import google.generativeai as genai
+    def __init__(self, model: str = "gemini-2.5-flash"):
+        from google import genai
 
         api_key = get_secret("GOOGLE_API_KEY")
         if not api_key:
             raise ValueError("GOOGLE_API_KEY를 설정하세요 (Streamlit secrets 또는 환경변수)")
 
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(model)
-        self.embed_model = "models/text-embedding-004"
+        self.client = genai.Client(api_key=api_key)
+        self.model = model
+        self.embed_model = "text-embedding-004"
 
     def generate(self, prompt: str) -> str:
-        response = self.model.generate_content(prompt)
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=prompt
+        )
         return response.text
 
     def get_embedding(self, text: str) -> list[float]:
-        import google.generativeai as genai
-        result = genai.embed_content(
+        response = self.client.models.embed_content(
             model=self.embed_model,
-            content=text
+            contents=text
         )
-        return result['embedding']
+        return response.embeddings[0].values
 
 
 class OpenAILLM(BaseLLM):
-    """OpenAI API (GPT)"""
+    """OpenAI API (new SDK)"""
 
-    def __init__(self, model: str = "gpt-4o-mini", embedding_model: str = "text-embedding-3-small"):
+    def __init__(self, model: str = "gpt-5-mini", embedding_model: str = "text-embedding-3-small"):
         from openai import OpenAI
 
         api_key = get_secret("OPENAI_API_KEY")
@@ -306,11 +296,11 @@ class OpenAILLM(BaseLLM):
         self.embedding_model = embedding_model
 
     def generate(self, prompt: str) -> str:
-        response = self.client.chat.completions.create(
+        response = self.client.responses.create(
             model=self.model,
-            messages=[{"role": "user", "content": prompt}]
+            input=prompt
         )
-        return response.choices[0].message.content
+        return response.output_text
 
     def get_embedding(self, text: str) -> list[float]:
         response = self.client.embeddings.create(
