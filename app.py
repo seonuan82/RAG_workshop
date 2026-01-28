@@ -5,7 +5,7 @@ RAG Workshop - Streamlit UI
 """
 
 import streamlit as st
-from rag_workshop import (
+from rag import (
     Config, Document, Chunk,
     load_korquad_data, create_chunks, create_llm,
     SimpleVectorStore, RAGPipeline, cosine_similarity
