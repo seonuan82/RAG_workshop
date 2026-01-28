@@ -101,8 +101,48 @@ class Document:
     questions: list[dict]  # [{"question": "...", "answer": "..."}]
 
 
-def load_korquad_data(filepath: str, max_docs: Optional[int] = None) -> list[Document]:
-    """KorQuAD 2.1 JSON 파일에서 문서 로드"""
+def load_korquad_from_huggingface(max_docs: Optional[int] = None) -> list[Document]:
+    """Hugging Face에서 KorQuAD 2.1 데이터 로드 (Streamlit Cloud용)"""
+    from datasets import load_dataset
+
+    # KorQuAD 2.1 로드
+    dataset = load_dataset("squad_kor_v2", split="train")
+
+    documents = []
+    seen_contexts = set()  # 중복 제거용
+
+    for idx, item in enumerate(dataset):
+        if max_docs and len(documents) >= max_docs:
+            break
+
+        context = item['context']
+
+        # 중복 컨텍스트 스킵
+        context_hash = hash(context[:200])
+        if context_hash in seen_contexts:
+            continue
+        seen_contexts.add(context_hash)
+
+        # HTML 태그 제거 (있는 경우)
+        clean_content = strip_html_tags(context) if '<' in context else context
+
+        doc = Document(
+            doc_id=f"doc_{len(documents)}",
+            title=item.get('title', f"문서_{len(documents)}"),
+            url="",
+            content=clean_content,
+            questions=[{
+                "question": item['question'],
+                "answer": item['answers']['text'][0] if item['answers']['text'] else ""
+            }]
+        )
+        documents.append(doc)
+
+    return documents
+
+
+def load_korquad_from_json(filepath: str, max_docs: Optional[int] = None) -> list[Document]:
+    """로컬 JSON 파일에서 KorQuAD 2.1 데이터 로드"""
     with open(filepath, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
@@ -131,6 +171,22 @@ def load_korquad_data(filepath: str, max_docs: Optional[int] = None) -> list[Doc
         documents.append(doc)
 
     return documents
+
+
+def load_korquad_data(filepath: Optional[str] = None, max_docs: Optional[int] = None) -> list[Document]:
+    """
+    KorQuAD 데이터 로드 (자동 선택)
+    - 로컬 파일이 있으면 JSON에서 로드
+    - 없으면 Hugging Face에서 로드
+    """
+    # 로컬 파일 확인
+    if filepath and os.path.exists(filepath):
+        print(f"   로컬 파일에서 로드: {filepath}")
+        return load_korquad_from_json(filepath, max_docs)
+
+    # Hugging Face에서 로드
+    print("   Hugging Face에서 로드 중...")
+    return load_korquad_from_huggingface(max_docs)
 
 
 # === 텍스트 청킹 ===
@@ -445,8 +501,9 @@ def main():
 
     # 1. 데이터 로드
     print("1. 데이터 로드 중...")
-    data_path = os.path.join(os.path.dirname(__file__), "korquad2.1_train_00.json")
-    documents = load_korquad_data(data_path, max_docs=config.max_documents)
+    # 로컬 파일이 있으면 사용, 없으면 Hugging Face에서 자동 로드
+    local_path = os.path.join(os.path.dirname(__file__), "korquad2.1_train_00.json")
+    documents = load_korquad_data(local_path, max_docs=config.max_documents)
     print(f"   {len(documents)}개 문서 로드 완료")
 
     # 2. 청킹
