@@ -109,7 +109,7 @@ def load_korquad_from_huggingface(max_docs: Optional[int] = None) -> list[Docume
     dataset = load_dataset("squad_kor_v2", split="train")
 
     documents = []
-    seen_contexts = set()  # 중복 제거용
+    seen_contexts = set()  # 중복 제거용 (같은 context에 여러 QA가 있음)
 
     for idx, item in enumerate(dataset):
         if max_docs and len(documents) >= max_docs:
@@ -117,23 +117,23 @@ def load_korquad_from_huggingface(max_docs: Optional[int] = None) -> list[Docume
 
         context = item['context']
 
-        # 중복 컨텍스트 스킵
+        # 중복 컨텍스트 스킵 (같은 문서에 여러 질문이 있을 수 있음)
         context_hash = hash(context[:200])
         if context_hash in seen_contexts:
             continue
         seen_contexts.add(context_hash)
 
-        # HTML 태그 제거 (있는 경우)
+        # HTML 태그 제거 (KorQuAD 2.1은 HTML 포함)
         clean_content = strip_html_tags(context) if '<' in context else context
 
         doc = Document(
             doc_id=f"doc_{len(documents)}",
             title=item.get('title', f"문서_{len(documents)}"),
-            url="",
+            url=item.get('url', ""),
             content=clean_content,
             questions=[{
                 "question": item['question'],
-                "answer": item['answers']['text'][0] if item['answers']['text'] else ""
+                "answer": item['answer']['text']  # answer (단수), text 직접 접근
             }]
         )
         documents.append(doc)
