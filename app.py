@@ -2,25 +2,36 @@
 RAG Workshop - Streamlit UI
 ============================
 실행: streamlit run app.py
+
+OECD 한국 디지털 정부 리뷰 (2025) 문서를 활용한 RAG 실습
+- 2025년 최신 문서로 LLM이 사전 학습하지 않은 내용
+- RAG의 가치를 명확히 보여줄 수 있음
 """
 
 import streamlit as st
+import pandas as pd
 from rag_workshop import (
     Config, Document, Chunk,
-    load_korquad_data, create_chunks, create_llm,
-    SimpleVectorStore, RAGPipeline, cosine_similarity
+    load_oecd_data, create_chunks, create_llm,
+    SimpleVectorStore, RAGPipeline, cosine_similarity,
+    OECD_SAMPLE_QA
 )
 import os
 
 # 페이지 설정
 st.set_page_config(
-    page_title="RAG Workshop",
+    page_title="RAG Workshop - OECD Korea Review",
     page_icon="🔍",
     layout="wide"
 )
 
 st.title("🔍 RAG Workshop")
-st.markdown("KorQuAD 2.1 기반 RAG 실습")
+st.markdown("""
+**OECD 한국 디지털 정부 리뷰 (2025)** 기반 RAG 실습
+
+이 워크샵에서는 2025년 1월 발표된 OECD 문서를 활용합니다.
+LLM은 이 문서를 사전 학습하지 않았기 때문에, RAG 없이는 정확한 답변이 어렵습니다.
+""")
 
 # 사이드바 - 설정
 with st.sidebar:
@@ -70,9 +81,9 @@ with col1:
                     max_documents=max_documents
                 )
 
-                # 데이터 로드
-                st.info("📥 데이터 로드 중...")
-                documents = load_korquad_data(max_docs=config.max_documents)
+                # 데이터 로드 (OECD 문서)
+                st.info("📥 OECD 데이터 로드 중...")
+                documents = load_oecd_data(max_docs=config.max_documents)
                 st.session_state.documents = documents
 
                 # 청킹
@@ -104,25 +115,28 @@ with col1:
                 st.session_state.rag = rag
                 st.session_state.llm = llm  # LLM 저장
                 st.session_state.initialized = True
-                st.success(f"✅ 초기화 완료! ({len(documents)}개 문서, {len(chunks)}개 청크)")
+                st.success(f"✅ 초기화 완료! ({len(documents)}개 챕터, {len(chunks)}개 청크)")
 
             except Exception as e:
                 st.error(f"❌ 오류: {e}")
 
 with col2:
     if st.session_state.initialized:
-        st.success(f"✅ RAG 준비 완료 | {len(st.session_state.documents)}개 문서 | {len(st.session_state.chunks)}개 청크")
+        st.success(f"✅ RAG 준비 완료 | {len(st.session_state.documents)}개 챕터 | {len(st.session_state.chunks)}개 청크")
 
 
 # 탭 구성
 if st.session_state.initialized:
-    tab1, tab2, tab3 = st.tabs(["💬 질문하기", "📊 샘플 테스트", "🔬 비교 실험"])
+    tab1, tab2, tab3, tab4 = st.tabs(["💬 질문하기", "📊 RAG vs API", "🔬 Top-K 실험", "✂️ 청킹 실험"])
 
     # 탭 1: 자유 질문
     with tab1:
         st.subheader("💬 자유 질문하기")
 
-        question = st.text_input("질문을 입력하세요:", placeholder="예: 김연아의 출생지는?")
+        question = st.text_input(
+            "질문을 입력하세요:",
+            placeholder="예: 한국 디지털 정부의 주요 과제는 무엇인가요?"
+        )
 
         if st.button("답변 생성", key="free_query"):
             if question:
@@ -142,23 +156,21 @@ if st.session_state.initialized:
     # 탭 2: 샘플 테스트 (RAG vs 순수 API 비교)
     with tab2:
         st.subheader("📊 RAG vs 순수 API 비교")
-        st.markdown("**RAG 사용 시와 사용하지 않을 때의 답변을 비교합니다.**")
+        st.markdown("""
+        **RAG 사용 시와 사용하지 않을 때의 답변을 비교합니다.**
 
-        # 샘플 질문 선택
-        sample_questions = []
-        for doc in st.session_state.documents[:10]:
-            if doc.questions:
-                sample_questions.append({
-                    "question": doc.questions[0]["question"],
-                    "answer": doc.questions[0]["answer"],
-                    "title": doc.title
-                })
+        💡 *OECD 한국 디지털 정부 리뷰는 2025년 1월 발표된 문서입니다.*
+        *LLM은 이 문서를 학습하지 않았기 때문에, RAG 없이는 정확한 답변이 어렵습니다.*
+        """)
+
+        # OECD 샘플 질문 사용
+        sample_questions = OECD_SAMPLE_QA
 
         if sample_questions:
             selected = st.selectbox(
                 "샘플 질문 선택:",
                 range(len(sample_questions)),
-                format_func=lambda i: f"{sample_questions[i]['title']}: {sample_questions[i]['question'][:50]}..."
+                format_func=lambda i: f"{sample_questions[i]['question'][:60]}..."
             )
 
             st.markdown(f"**정답 (Ground Truth):** `{sample_questions[selected]['answer']}`")
@@ -212,7 +224,7 @@ if st.session_state.initialized:
     with tab3:
         st.subheader("🔬 Top-K 비교 실험")
 
-        test_question = st.text_input("비교할 질문:", value=sample_questions[0]["question"] if sample_questions else "")
+        test_question = st.text_input("비교할 질문:", value=OECD_SAMPLE_QA[0]["question"] if OECD_SAMPLE_QA else "")
 
         k_values = st.multiselect("비교할 Top-K 값:", [1, 2, 3, 5, 7, 10], default=[1, 3, 5])
 
@@ -241,10 +253,132 @@ if st.session_state.initialized:
                         st.write(f"**답변:** {result['answer']}")
                         st.write(f"**참조 문서:** {[s['title'] for s in result['sources']]}")
 
+    # 탭 4: 청킹 실험 (토이 프로젝트)
+    with tab4:
+        st.subheader("✂️ 청킹 실험 (Toy Project)")
+        st.markdown("""
+        **청크 크기와 오버랩이 RAG 성능에 미치는 영향을 실험합니다.**
+        - 소규모 데이터 (3개 챕터)로 빠르게 실험
+        - 3가지 질문으로 결과 비교
+        """)
+
+        st.divider()
+
+        # 실험용 데이터 준비 (3개 챕터만)
+        toy_docs = st.session_state.documents[:3]
+
+        # OECD 샘플 질문 3개 사용
+        toy_questions = OECD_SAMPLE_QA[:3]
+
+        if len(toy_questions) < 1:
+            st.warning("질문이 있는 문서가 없습니다.")
+        else:
+            # 실험 설정
+            col_settings1, col_settings2 = st.columns(2)
+
+            with col_settings1:
+                st.markdown("### 📐 청킹 설정")
+                exp_chunk_sizes = st.multiselect(
+                    "청크 크기 선택:",
+                    [100, 200, 300, 500, 700, 1000],
+                    default=[200, 500],
+                    key="exp_chunk_size"
+                )
+                exp_overlap_ratio = st.slider(
+                    "오버랩 비율 (%):",
+                    0, 50, 20, 5,
+                    key="exp_overlap",
+                    help="청크 크기의 몇 %를 오버랩할지"
+                )
+
+            with col_settings2:
+                st.markdown("### ❓ 테스트 질문")
+                for i, q in enumerate(toy_questions):
+                    st.markdown(f"**Q{i+1}.** {q['question'][:50]}...")
+                    st.caption(f"정답: {q['answer']}")
+
+            st.divider()
+
+            # 실험 실행
+            if st.button("🧪 청킹 실험 실행", key="run_chunk_exp", type="primary"):
+                if not exp_chunk_sizes:
+                    st.warning("청크 크기를 1개 이상 선택하세요.")
+                else:
+                    results_table = []
+
+                    progress = st.progress(0)
+                    total_steps = len(exp_chunk_sizes) * len(toy_questions)
+                    current_step = 0
+
+                    for chunk_size in exp_chunk_sizes:
+                        overlap = int(chunk_size * exp_overlap_ratio / 100)
+
+                        # 청킹
+                        exp_chunks = create_chunks(toy_docs, chunk_size=chunk_size, overlap=overlap)
+
+                        # 임베딩 생성 (소규모라 빠름)
+                        with st.spinner(f"청크 크기 {chunk_size} 임베딩 중..."):
+                            for chunk in exp_chunks:
+                                chunk.embedding = st.session_state.llm.get_embedding(chunk.content)
+
+                        # 벡터 저장소 및 RAG
+                        exp_vector_store = SimpleVectorStore()
+                        exp_vector_store.add_chunks(exp_chunks)
+
+                        exp_config = Config(chunk_size=chunk_size, chunk_overlap=overlap, top_k=3)
+                        exp_rag = RAGPipeline(st.session_state.llm, exp_vector_store, exp_config)
+
+                        # 각 질문에 대해 테스트
+                        for q_idx, q in enumerate(toy_questions):
+                            result = exp_rag.query(q["question"])
+                            is_correct = q["answer"].lower() in result["answer"].lower()
+
+                            results_table.append({
+                                "청크크기": chunk_size,
+                                "오버랩": overlap,
+                                "청크수": len(exp_chunks),
+                                "질문": f"Q{q_idx+1}",
+                                "정답포함": "✅" if is_correct else "❌",
+                                "참조문서": ", ".join([s["title"][:10] for s in result["sources"]])
+                            })
+
+                            current_step += 1
+                            progress.progress(current_step / total_steps)
+
+                    # 결과 표시
+                    st.markdown("### 📊 실험 결과")
+
+                    df = pd.DataFrame(results_table)
+                    st.dataframe(df, use_container_width=True)
+
+                    # 요약
+                    st.markdown("### 📈 요약")
+                    for chunk_size in exp_chunk_sizes:
+                        subset = [r for r in results_table if r["청크크기"] == chunk_size]
+                        correct_count = sum(1 for r in subset if r["정답포함"] == "✅")
+                        total_count = len(subset)
+                        accuracy = correct_count / total_count * 100 if total_count > 0 else 0
+
+                        chunk_count = subset[0]["청크수"] if subset else 0
+
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric(f"청크 {chunk_size}", f"{chunk_count}개 청크")
+                        col2.metric("정확도", f"{accuracy:.0f}%")
+                        col3.metric("정답", f"{correct_count}/{total_count}")
+
+                    # 상세 결과
+                    st.markdown("### 🔍 상세 결과")
+                    for chunk_size in exp_chunk_sizes:
+                        with st.expander(f"청크 크기: {chunk_size}"):
+                            subset = [r for r in results_table if r["청크크기"] == chunk_size]
+                            for r in subset:
+                                status = r["정답포함"]
+                                st.markdown(f"{status} **{r['질문']}** - 참조: {r['참조문서']}")
+
 else:
     st.info("👆 사이드바에서 설정 후 '🚀 RAG 초기화' 버튼을 클릭하세요.")
 
 
 # 푸터
 st.divider()
-st.caption("RAG Workshop | KorQuAD 2.1 | Gemini / OpenAI")
+st.caption("RAG Workshop | OECD Digital Government Review of Korea (2025) | Gemini / OpenAI")

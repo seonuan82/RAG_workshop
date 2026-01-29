@@ -1,8 +1,14 @@
 """
-RAG Workshop - KorQuAD 2.1 기반 실습
-=====================================
+RAG Workshop - OECD Digital Government Review of Korea (2025)
+==============================================================
 
-이 모듈은 KorQuAD 2.1 데이터셋을 활용한 RAG(Retrieval-Augmented Generation) 실습을 위한 코드입니다.
+이 모듈은 OECD 한국 디지털 정부 리뷰 (2025) 문서를 활용한
+RAG(Retrieval-Augmented Generation) 실습을 위한 코드입니다.
+
+이 데이터셋을 사용하는 이유:
+- 2025년 1월 발표된 최신 문서로, LLM이 사전 학습하지 않은 내용
+- 한국 디지털 정부에 대한 구체적인 정책 권고와 통계 포함
+- RAG의 가치를 명확히 보여줄 수 있음 (순수 LLM은 답할 수 없는 질문에 답변 가능)
 
 사용법:
     [로컬 실행]
@@ -190,6 +196,150 @@ def load_korquad_data(filepath: Optional[str] = None, max_docs: Optional[int] = 
 
     # GitHub에서 직접 다운로드
     return load_korquad_from_github(max_docs)
+
+
+# === OECD 데이터 로더 ===
+# 샘플 질문과 답변 (RAG 테스트용)
+OECD_SAMPLE_QA = [
+    {
+        "question": "OECD 디지털 정부 리뷰에서 한국 디지털 정부의 4가지 주요 평가 영역은 무엇인가요?",
+        "answer": "거버넌스, 데이터, AI, 인간 중심 서비스"
+    },
+    {
+        "question": "한국의 디지털 정부 전환을 주도하는 핵심 정부 부처는 어디인가요?",
+        "answer": "행정안전부 (MOIS)"
+    },
+    {
+        "question": "OECD 디지털정부지수에서 한국의 데이터 관련 성과는 어떤가요?",
+        "answer": "OECD 국가 중 정부 데이터 및 공개 데이터 성숙도에서 1위"
+    },
+    {
+        "question": "한국의 디지털 정부 플랫폼인 Government24에서 제공하는 서비스 수는 몇 개인가요?",
+        "answer": "1,500개 이상"
+    },
+    {
+        "question": "한국의 전자정부법은 언제 제정되었나요?",
+        "answer": "2001년"
+    },
+    {
+        "question": "한국의 기본 AI법(Basic AI Act)은 언제 시행될 예정인가요?",
+        "answer": "2026년"
+    },
+    {
+        "question": "OECD가 권고하는 디지털 정부 투자 관리 개선 방안은 무엇인가요?",
+        "answer": "다년도 예산 옵션, 혁신팀 자금 지원, 조건부 초과지출 허용, AI 등 디지털 기술 전용 펀드"
+    },
+    {
+        "question": "한국 디지털 정부의 데이터 관련 주요 과제는 무엇인가요?",
+        "answer": "데이터 발견 가능성, 데이터 접근 및 공유에 대한 법적 준수 지원, 구식 법률로 인한 데이터 공유 장애"
+    },
+    {
+        "question": "한국 정부의 AI 사용 분야 예시를 들어주세요.",
+        "answer": "노동 검사 도구, 특허 심사 지원, 홍수 예측 시스템"
+    },
+    {
+        "question": "OECD가 한국에 권고하는 AI 관련 투명성 강화 방안은 무엇인가요?",
+        "answer": "정부 AI 시스템의 공개 등록부(public inventory) 구축"
+    },
+]
+
+
+def load_oecd_data(filepath: Optional[str] = None, max_docs: Optional[int] = None) -> list[Document]:
+    """
+    OECD 디지털 정부 리뷰 데이터 로드
+
+    Args:
+        filepath: oecd.txt 파일 경로 (None이면 기본 경로 사용)
+        max_docs: 최대 문서 수 (챕터 기준)
+
+    Returns:
+        Document 리스트 (챕터별로 분할)
+    """
+    # 기본 경로 설정
+    if filepath is None:
+        filepath = os.path.join(os.path.dirname(__file__), "oecd.txt")
+
+    # GitHub에서 다운로드 시도 (로컬 파일이 없는 경우)
+    if not os.path.exists(filepath):
+        return load_oecd_from_github(max_docs)
+
+    print(f"   로컬 파일에서 로드: {filepath}")
+
+    # 파일 읽기
+    with open(filepath, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    # 챕터별로 분할
+    chapters = [
+        ("Executive Summary", "Executive summary", "Assessment and recommendations"),
+        ("Assessment and Recommendations", "Assessment and recommendations", "Korea's journey to becoming"),
+        ("Korea's Digital Government Journey", "Korea's journey to becoming a global leader", "Strengthening governance"),
+        ("Governance, Investment, and Skills", "Strengthening governance, investment, and skills for digital government", "Improving data governance"),
+        ("Data Governance", "Improving data governance, sharing, and use", "Leveraging AI for government"),
+        ("AI for Government", "Leveraging AI for government transformation", "Delivering human-centred"),
+        ("Human-Centred Services", "Delivering human-centred and proactive public services", None),
+    ]
+
+    documents = []
+    qa_idx = 0
+
+    for idx, (title, start_marker, end_marker) in enumerate(chapters):
+        # 챕터 내용 추출
+        start_pos = content.find(start_marker)
+        if start_pos == -1:
+            continue
+
+        if end_marker:
+            end_pos = content.find(end_marker, start_pos + len(start_marker))
+            if end_pos == -1:
+                end_pos = len(content)
+        else:
+            end_pos = len(content)
+
+        chapter_content = content[start_pos:end_pos].strip()
+
+        # 연속된 공백/줄바꿈 정리
+        chapter_content = re.sub(r'\n{3,}', '\n\n', chapter_content)
+        chapter_content = re.sub(r'[ \t]+', ' ', chapter_content)
+
+        # 챕터에 해당하는 Q&A 할당 (순환)
+        questions = []
+        if qa_idx < len(OECD_SAMPLE_QA):
+            # 각 챕터에 1-2개의 Q&A 할당
+            questions.append(OECD_SAMPLE_QA[qa_idx])
+            qa_idx += 1
+            if qa_idx < len(OECD_SAMPLE_QA):
+                questions.append(OECD_SAMPLE_QA[qa_idx])
+                qa_idx += 1
+
+        doc = Document(
+            doc_id=f"oecd_chapter_{idx}",
+            title=title,
+            url="https://www.oecd.org/en/publications/digital-government-review-of-korea_d5ac8a8f-en.html",
+            content=chapter_content,
+            questions=questions
+        )
+        documents.append(doc)
+
+        if max_docs and len(documents) >= max_docs:
+            break
+
+    return documents
+
+
+def load_oecd_from_github(max_docs: Optional[int] = None) -> list[Document]:
+    """GitHub에서 OECD 데이터 직접 다운로드"""
+    import urllib.request
+    import tempfile
+
+    url = "https://raw.githubusercontent.com/seonuan82/RAG_Workshop/main/oecd.txt"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        txt_path = os.path.join(tmpdir, "oecd.txt")
+        print("   GitHub에서 OECD 데이터 다운로드 중...")
+        urllib.request.urlretrieve(url, txt_path)
+
+        return load_oecd_data(txt_path, max_docs)
 
 
 # === 텍스트 청킹 ===
@@ -518,15 +668,14 @@ def main():
     )
 
     print(f"=== RAG Workshop ===")
+    print(f"OECD Digital Government Review of Korea (2025)")
     print(f"LLM Provider: {config.llm_provider}")
     print()
 
-    # 1. 데이터 로드
+    # 1. 데이터 로드 (OECD 문서)
     print("1. 데이터 로드 중...")
-    # 로컬 파일이 있으면 사용, 없으면 Hugging Face에서 자동 로드
-    local_path = os.path.join(os.path.dirname(__file__), "korquad2.1_train_00.json")
-    documents = load_korquad_data(local_path, max_docs=config.max_documents)
-    print(f"   {len(documents)}개 문서 로드 완료")
+    documents = load_oecd_data(max_docs=config.max_documents)
+    print(f"   {len(documents)}개 챕터 로드 완료")
 
     # 2. 청킹
     print("\n2. 문서 청킹 중...")
