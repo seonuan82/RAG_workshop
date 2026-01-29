@@ -14,7 +14,7 @@ from rag_workshop import (
     Config, Document, Chunk,
     load_oecd_data, create_chunks, create_llm,
     SimpleVectorStore, RAGPipeline, cosine_similarity,
-    OECD_SAMPLE_QA
+    OECD_SAMPLE_QA, keyword_search
 )
 import os
 
@@ -127,7 +127,7 @@ with col2:
 
 # 탭 구성
 if st.session_state.initialized:
-    tab1, tab2, tab3, tab4 = st.tabs(["💬 질문하기", "📊 RAG vs API", "🔬 Top-K 실험", "✂️ 청킹 실험"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["💬 질문하기", "📊 RAG vs API", "🔤 검색 방식", "🔬 Top-K 실험", "✂️ 청킹 실험"])
 
     # 탭 1: 자유 질문
     with tab1:
@@ -179,15 +179,10 @@ if st.session_state.initialized:
                 question = sample_questions[selected]["question"]
                 ground_truth = sample_questions[selected]["answer"]
 
-                col1, col2, col3 = st.columns(3)
+                col1, col2 = st.columns(2)
 
-                # 1. 정답
+                # 1. 순수 API (RAG 없이)
                 with col1:
-                    st.markdown("### 🎯 정답")
-                    st.info(ground_truth)
-
-                # 2. 순수 API (RAG 없이)
-                with col2:
                     st.markdown("### 💬 순수 API")
                     with st.spinner("순수 API 호출 중..."):
                         pure_prompt = f"다음 질문에 답변하세요.\n\n질문: {question}\n\n답변:"
@@ -200,8 +195,8 @@ if st.session_state.initialized:
                         else:
                             st.error("❌ 정답 미포함")
 
-                # 3. RAG 사용
-                with col3:
+                # 2. RAG 사용
+                with col2:
                     st.markdown("### 🔍 RAG 사용")
                     with st.spinner("RAG 답변 생성 중..."):
                         rag_result = st.session_state.rag.query(question)
@@ -220,8 +215,91 @@ if st.session_state.initialized:
                     with st.expander(f"{i+1}. {source['title']}"):
                         st.write(source["content"])
 
-    # 탭 3: 비교 실험
+    # 탭 3: 검색 방식 비교 (Semantic vs Keyword)
     with tab3:
+        st.subheader("🔤 Semantic Search vs Keyword Search")
+        st.markdown("""
+        **두 가지 검색 방식의 결과를 비교합니다.**
+
+        | 방식 | 원리 | 특징 |
+        |------|------|------|
+        | **Keyword (BM25)** | 단어 빈도 + 역문서 빈도 | 빠름, 정확한 용어 매칭 |
+        | **Semantic** | 임베딩 벡터 유사도 | 의미 이해, 동의어 처리 |
+
+        💡 *예: "AI법"을 검색하면 Keyword는 정확히 "AI법"이 있는 문서만, Semantic은 "인공지능 법률"도 찾습니다.*
+        """)
+
+        st.divider()
+
+        # 검색 질문 입력
+        search_query = st.text_input(
+            "검색할 질문:",
+            value="한국의 인공지능 관련 법률은 언제 시행되나요?",
+            key="search_compare_query"
+        )
+
+        col_k1, col_k2 = st.columns(2)
+        with col_k1:
+            search_top_k = st.slider("검색 결과 수 (Top-K)", 1, 10, 5, key="search_topk")
+
+        if st.button("🔍 검색 비교 실행", key="run_search_compare", type="primary"):
+            if search_query:
+                col_semantic, col_keyword = st.columns(2)
+
+                # Semantic Search
+                with col_semantic:
+                    st.markdown("### 🧠 Semantic Search")
+                    st.caption("임베딩 기반 의미 유사도 검색")
+
+                    with st.spinner("Semantic 검색 중..."):
+                        query_embedding = st.session_state.llm.get_embedding(search_query)
+                        semantic_results = st.session_state.rag.vector_store.search(
+                            query_embedding, top_k=search_top_k
+                        )
+
+                    for i, (chunk, score) in enumerate(semantic_results):
+                        with st.expander(f"{i+1}. [{chunk.title}] (유사도: {score:.4f})"):
+                            st.write(chunk.content[:300] + "...")
+
+                # Keyword Search
+                with col_keyword:
+                    st.markdown("### 📝 Keyword Search (BM25)")
+                    st.caption("단어 빈도 기반 검색")
+
+                    with st.spinner("Keyword 검색 중..."):
+                        keyword_results = keyword_search(
+                            search_query,
+                            st.session_state.chunks,
+                            top_k=search_top_k
+                        )
+
+                    for i, (chunk, score) in enumerate(keyword_results):
+                        with st.expander(f"{i+1}. [{chunk.title}] (BM25: {score:.4f})"):
+                            st.write(chunk.content[:300] + "...")
+
+                # 결과 비교 분석
+                st.divider()
+                st.markdown("### 📊 결과 비교 분석")
+
+                semantic_titles = [c.title for c, _ in semantic_results]
+                keyword_titles = [c.title for c, _ in keyword_results]
+
+                overlap = set(semantic_titles) & set(keyword_titles)
+                only_semantic = set(semantic_titles) - set(keyword_titles)
+                only_keyword = set(keyword_titles) - set(semantic_titles)
+
+                col_stat1, col_stat2, col_stat3 = st.columns(3)
+                col_stat1.metric("공통 결과", f"{len(overlap)}개")
+                col_stat2.metric("Semantic만", f"{len(only_semantic)}개")
+                col_stat3.metric("Keyword만", f"{len(only_keyword)}개")
+
+                if only_semantic:
+                    st.info(f"🧠 Semantic만 찾은 챕터: {', '.join(only_semantic)}")
+                if only_keyword:
+                    st.info(f"📝 Keyword만 찾은 챕터: {', '.join(only_keyword)}")
+
+    # 탭 4: Top-K 비교 실험
+    with tab4:
         st.subheader("🔬 Top-K 비교 실험")
 
         test_question = st.text_input("비교할 질문:", value=OECD_SAMPLE_QA[0]["question"] if OECD_SAMPLE_QA else "")
@@ -253,8 +331,8 @@ if st.session_state.initialized:
                         st.write(f"**답변:** {result['answer']}")
                         st.write(f"**참조 문서:** {[s['title'] for s in result['sources']]}")
 
-    # 탭 4: 청킹 실험 (토이 프로젝트)
-    with tab4:
+    # 탭 5: 청킹 실험 (토이 프로젝트)
+    with tab5:
         st.subheader("✂️ 청킹 실험 (Toy Project)")
         st.markdown("""
         **청크 크기와 오버랩이 RAG 성능에 미치는 영향을 실험합니다.**
@@ -280,8 +358,8 @@ if st.session_state.initialized:
                 st.markdown("### 📐 청킹 설정")
                 exp_chunk_sizes = st.multiselect(
                     "청크 크기 선택:",
-                    [100, 200, 300, 500, 700, 1000],
-                    default=[200, 500],
+                    [500, 700, 1000, 1200, 1500],
+                    default=[500, 1000],
                     key="exp_chunk_size"
                 )
                 exp_overlap_ratio = st.slider(

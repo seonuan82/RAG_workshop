@@ -489,12 +489,97 @@ def create_llm(config: Config) -> BaseLLM:
 
 # === 벡터 검색 (간단한 구현) ===
 import numpy as np
+import math
+from collections import Counter
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     """코사인 유사도 계산"""
     a = np.array(a)
     b = np.array(b)
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+
+# === 키워드 검색 (BM25) ===
+def tokenize(text: str) -> list[str]:
+    """간단한 토크나이저 (한국어/영어 모두 지원)"""
+    # 소문자 변환 및 특수문자 제거
+    text = text.lower()
+    text = re.sub(r'[^\w\s가-힣]', ' ', text)
+    # 공백 기준 분리
+    tokens = text.split()
+    # 불용어 제거 (간단한 버전)
+    stopwords = {'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
+                 '은', '는', '이', '가', '을', '를', '의', '에', '에서', '으로', '로', '와', '과', '도'}
+    return [t for t in tokens if t not in stopwords and len(t) > 1]
+
+
+def bm25_score(query_tokens: list[str], doc_tokens: list[str],
+               avg_doc_len: float, doc_count: int, doc_freqs: dict,
+               k1: float = 1.5, b: float = 0.75) -> float:
+    """BM25 스코어 계산"""
+    score = 0.0
+    doc_len = len(doc_tokens)
+    doc_token_counts = Counter(doc_tokens)
+
+    for token in query_tokens:
+        if token not in doc_token_counts:
+            continue
+
+        # TF (Term Frequency)
+        tf = doc_token_counts[token]
+
+        # IDF (Inverse Document Frequency)
+        df = doc_freqs.get(token, 0)
+        idf = math.log((doc_count - df + 0.5) / (df + 0.5) + 1)
+
+        # BM25 공식
+        numerator = tf * (k1 + 1)
+        denominator = tf + k1 * (1 - b + b * (doc_len / avg_doc_len))
+        score += idf * (numerator / denominator)
+
+    return score
+
+
+def keyword_search(query: str, chunks: list, top_k: int = 3) -> list[tuple]:
+    """
+    BM25 기반 키워드 검색
+
+    Args:
+        query: 검색 쿼리
+        chunks: Chunk 리스트
+        top_k: 반환할 결과 수
+
+    Returns:
+        [(Chunk, score), ...] 리스트
+    """
+    # 쿼리 토큰화
+    query_tokens = tokenize(query)
+
+    # 모든 청크 토큰화
+    chunk_tokens_list = [tokenize(chunk.content) for chunk in chunks]
+
+    # 문서 빈도 계산 (IDF용)
+    doc_freqs = Counter()
+    for tokens in chunk_tokens_list:
+        unique_tokens = set(tokens)
+        for token in unique_tokens:
+            doc_freqs[token] += 1
+
+    # 평균 문서 길이
+    avg_doc_len = sum(len(tokens) for tokens in chunk_tokens_list) / len(chunks) if chunks else 1
+
+    # BM25 스코어 계산
+    results = []
+    for chunk, doc_tokens in zip(chunks, chunk_tokens_list):
+        score = bm25_score(
+            query_tokens, doc_tokens,
+            avg_doc_len, len(chunks), doc_freqs
+        )
+        results.append((chunk, score))
+
+    # 스코어 기준 내림차순 정렬
+    results.sort(key=lambda x: x[1], reverse=True)
+    return results[:top_k]
 
 
 class SimpleVectorStore:
