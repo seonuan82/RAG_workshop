@@ -22,12 +22,16 @@ RAG(Retrieval-Augmented Generation) 실습을 위한 코드입니다.
 """
 
 import json
+import math
 import os
 import re
 from abc import ABC, abstractmethod
+from collections import Counter
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Optional
+
+import numpy as np
 
 
 # === API 키 관리 ===
@@ -488,10 +492,6 @@ def create_llm(config: Config) -> BaseLLM:
 
 
 # === 벡터 검색 (간단한 구현) ===
-import numpy as np
-import math
-from collections import Counter
-
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     """코사인 유사도 계산"""
     a = np.array(a)
