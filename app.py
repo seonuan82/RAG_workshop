@@ -5,7 +5,7 @@ RAG Workshop - Streamlit UI
 """
 
 import streamlit as st
-from rag import (
+from rag_workshop import (
     Config, Document, Chunk,
     load_korquad_data, create_chunks, create_llm,
     SimpleVectorStore, RAGPipeline, cosine_similarity
@@ -50,6 +50,7 @@ with st.sidebar:
 # 세션 상태 초기화
 if "rag" not in st.session_state:
     st.session_state.rag = None
+    st.session_state.llm = None  # LLM 객체 저장 (순수 API 비교용)
     st.session_state.documents = None
     st.session_state.chunks = None
     st.session_state.initialized = False
@@ -101,6 +102,7 @@ with col1:
                 vector_store.add_chunks(chunks)
 
                 st.session_state.rag = rag
+                st.session_state.llm = llm  # LLM 저장
                 st.session_state.initialized = True
                 st.success(f"✅ 초기화 완료! ({len(documents)}개 문서, {len(chunks)}개 청크)")
 
@@ -137,9 +139,10 @@ if st.session_state.initialized:
             else:
                 st.warning("질문을 입력하세요.")
 
-    # 탭 2: 샘플 테스트
+    # 탭 2: 샘플 테스트 (RAG vs 순수 API 비교)
     with tab2:
-        st.subheader("📊 데이터셋 기반 테스트")
+        st.subheader("📊 RAG vs 순수 API 비교")
+        st.markdown("**RAG 사용 시와 사용하지 않을 때의 답변을 비교합니다.**")
 
         # 샘플 질문 선택
         sample_questions = []
@@ -158,27 +161,52 @@ if st.session_state.initialized:
                 format_func=lambda i: f"{sample_questions[i]['title']}: {sample_questions[i]['question'][:50]}..."
             )
 
-            st.markdown(f"**정답 (Ground Truth):** {sample_questions[selected]['answer']}")
+            st.markdown(f"**정답 (Ground Truth):** `{sample_questions[selected]['answer']}`")
 
-            if st.button("RAG 답변 생성", key="sample_query"):
-                with st.spinner("답변 생성 중..."):
-                    result = st.session_state.rag.query(sample_questions[selected]["question"])
+            if st.button("🔄 비교 실행", key="compare_rag"):
+                question = sample_questions[selected]["question"]
+                ground_truth = sample_questions[selected]["answer"]
 
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown("### 🎯 정답")
-                        st.info(sample_questions[selected]["answer"])
-                    with col2:
-                        st.markdown("### 🤖 RAG 답변")
-                        st.success(result["answer"])
+                col1, col2, col3 = st.columns(3)
 
-                    # 정확도 체크
-                    is_correct = sample_questions[selected]["answer"].lower() in result["answer"].lower()
-                    if is_correct:
-                        st.balloons()
-                        st.success("✅ 정답 포함!")
-                    else:
-                        st.warning("⚠️ 정답이 답변에 포함되지 않음")
+                # 1. 정답
+                with col1:
+                    st.markdown("### 🎯 정답")
+                    st.info(ground_truth)
+
+                # 2. 순수 API (RAG 없이)
+                with col2:
+                    st.markdown("### 💬 순수 API")
+                    with st.spinner("순수 API 호출 중..."):
+                        pure_prompt = f"다음 질문에 답변하세요.\n\n질문: {question}\n\n답변:"
+                        pure_answer = st.session_state.llm.generate(pure_prompt)
+                        st.warning(pure_answer)
+
+                        pure_correct = ground_truth.lower() in pure_answer.lower()
+                        if pure_correct:
+                            st.success("✅ 정답 포함")
+                        else:
+                            st.error("❌ 정답 미포함")
+
+                # 3. RAG 사용
+                with col3:
+                    st.markdown("### 🔍 RAG 사용")
+                    with st.spinner("RAG 답변 생성 중..."):
+                        rag_result = st.session_state.rag.query(question)
+                        st.success(rag_result["answer"])
+
+                        rag_correct = ground_truth.lower() in rag_result["answer"].lower()
+                        if rag_correct:
+                            st.success("✅ 정답 포함")
+                        else:
+                            st.error("❌ 정답 미포함")
+
+                # 참조 문서 표시
+                st.markdown("---")
+                st.markdown("### 📚 RAG가 참조한 문서")
+                for i, source in enumerate(rag_result["sources"]):
+                    with st.expander(f"{i+1}. {source['title']}"):
+                        st.write(source["content"])
 
     # 탭 3: 비교 실험
     with tab3:
