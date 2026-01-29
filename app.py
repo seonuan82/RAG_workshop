@@ -38,7 +38,7 @@ with st.sidebar:
     st.header("⚙️ 설정")
 
     # 청크 설정
-    chunk_size = st.slider("청크 크기", 200, 1000, 500, 100)
+    chunk_size = st.slider("청크 크기", 700, 1500, 1000, 200)
     chunk_overlap = st.slider("청크 오버랩", 0, 200, 100, 50)
     top_k = st.slider("검색할 문서 수 (Top-K)", 1, 10, 3)
     max_documents = st.slider("로드할 문서 수", 10, 100, 50, 10)
