@@ -26,6 +26,7 @@ import numpy as np
 import re
 import math
 import os
+from pathlib import Path
 from collections import Counter
 from dataclasses import dataclass
 from typing import Optional
@@ -40,13 +41,27 @@ st.set_page_config(
 # === 설정 ===
 AVATAR_USER = "👤"
 AVATAR_BOT = "🤖"
-DATA_PATH = os.path.join(os.path.dirname(__file__), "Practice_data_NewsResult.CSV")
+
+# 파일 경로 설정 (로컬 및 Streamlit Cloud 모두 지원)
+def get_data_path():
+    """데이터 파일 경로를 반환합니다."""
+    current_dir = Path(__file__).parent if "__file__" in dir() else Path(".")
+    local_path = current_dir / "Practice_data_NewsResult.CSV"
+    if local_path.exists():
+        return str(local_path)
+    cloud_path = Path("Practice_data_NewsResult.CSV")
+    if cloud_path.exists():
+        return str(cloud_path)
+    return "Practice_data_NewsResult.CSV"
+
+DATA_PATH = get_data_path()
 
 
 # === 데이터 클래스 ===
 @dataclass
 class NewsItem:
     """뉴스 데이터 클래스"""
+    news_id: str
     date: str
     publisher: str
     title: str
@@ -80,33 +95,50 @@ def reset_chat():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def load_news_data(filepath: str, max_items: int = 100) -> list:
-    """CSV 파일에서 뉴스 데이터를 로드합니다."""
+    """
+    CSV 파일에서 뉴스 데이터를 로드합니다.
+
+    Args:
+        filepath: CSV 파일 경로
+        max_items: 로드할 최대 뉴스 수
+
+    Returns:
+        NewsItem 리스트
+
+    💡 힌트:
+    - pd.read_csv()로 CSV 파일 읽기 (여러 인코딩 시도: utf-8, cp949, euc-kr)
+    - 각 행을 NewsItem 객체로 변환
+    - 필요한 컬럼: 기사 고유번호, 일자, 언론사, 제목, 본문, URL
+    """
     news_list = []
 
-    # CSV 파일 읽기 (여러 인코딩 시도)
-    for encoding in ['utf-8', 'utf-8-sig', 'cp949', 'euc-kr']:
-        try:
-            df = pd.read_csv(filepath, encoding=encoding)
-            break
-        except (UnicodeDecodeError, LookupError):
-            continue
-    else:
-        # 마지막 수단: 오류 무시
-        df = pd.read_csv(filepath, encoding='utf-8', encoding_errors='ignore')
-
-    # 최대 max_items개만 사용
-    df = df.head(max_items)
-
-    # 각 행을 NewsItem으로 변환
-    for idx, row in df.iterrows():
-        news = NewsItem(
-            date=str(row['일자']),
-            publisher=str(row['언론사']),
-            title=str(row['제목']),
-            content=str(row['본문'])[:500],  # 본문은 500자로 제한
-            url=str(row['URL'])
-        )
-        news_list.append(news)
+    # TODO: 뉴스 데이터 로드 구현
+    # ──────────────────────────────────────────
+    # 1. CSV 파일 읽기 (여러 인코딩 시도)
+    #    for encoding in ['utf-8', 'utf-8-sig', 'cp949', 'euc-kr']:
+    #        try:
+    #            df = pd.read_csv(filepath, encoding=encoding)
+    #            break
+    #        except (UnicodeDecodeError, LookupError):
+    #            continue
+    #    else:
+    #        df = pd.read_csv(filepath, encoding='utf-8', encoding_errors='ignore')
+    #
+    # 2. 최대 max_items개만 사용
+    #    df = df.head(max_items)
+    #
+    # 3. 각 행을 NewsItem으로 변환
+    #    for idx, row in df.iterrows():
+    #        news = NewsItem(
+    #            news_id=str(row['기사 고유번호']),
+    #            date=str(row['일자']),
+    #            publisher=str(row['언론사']),
+    #            title=str(row['제목']),
+    #            content=str(row['본문'])[:500],  # 본문은 500자로 제한
+    #            url=str(row['URL'])
+    #        )
+    #        news_list.append(news)
+    # ──────────────────────────────────────────
 
     return news_list
 
@@ -364,16 +396,22 @@ def generate_rag_answer(query: str, news_data: list, llm) -> dict:
     }
 
 
-# === LLM 클래스 (rag_workshop.py에서 가져옴) ===
+# === LLM 클래스 ===
 def get_secret(key: str):
+    """API 키를 가져옵니다. (환경변수 > Streamlit secrets)"""
+    value = os.getenv(key)
+    if value:
+        return value
     try:
-        return st.secrets.get(key) or os.getenv(key)
-    except:
-        return os.getenv(key)
+        if hasattr(st, 'secrets') and key in st.secrets:
+            return st.secrets[key]
+    except Exception:
+        pass
+    return None
 
 
 class GeminiLLM:
-    def __init__(self, model: str = "gemini-2.5-flash"):
+    def __init__(self, model: str = "gemini-2.0-flash"):
         from google import genai
         api_key = get_secret("GOOGLE_API_KEY")
         if not api_key:
@@ -392,7 +430,7 @@ class GeminiLLM:
 
 
 class OpenAILLM:
-    def __init__(self, model: str = "gpt-5", embedding_model: str = "text-embedding-3-small"):
+    def __init__(self, model: str = "gpt-4o-mini", embedding_model: str = "text-embedding-3-small"):
         from openai import OpenAI
         api_key = get_secret("OPENAI_API_KEY")
         if not api_key:
@@ -414,9 +452,12 @@ class OpenAILLM:
 
 
 def create_llm():
+    """LLM 인스턴스를 생성합니다. (GOOGLE_API_KEY 우선)"""
     if get_secret("GOOGLE_API_KEY"):
+        st.sidebar.success("✅ Gemini API 사용")
         return GeminiLLM()
     elif get_secret("OPENAI_API_KEY"):
+        st.sidebar.success("✅ OpenAI API 사용")
         return OpenAILLM()
     else:
         raise ValueError("API 키를 설정하세요 (GOOGLE_API_KEY 또는 OPENAI_API_KEY)")
@@ -573,3 +614,4 @@ else:
         })
 
         st.rerun()
+
