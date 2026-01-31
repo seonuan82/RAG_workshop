@@ -57,7 +57,7 @@ def load_news_from_github(max_items: int = 100) -> list:
     import urllib.request
     import io
 
-    st.info(f"📥 GitHub에서 뉴스 데이터 다운로드 중...\n{GITHUB_CSV_URL}")
+    st.info(f"📥 GitHub에서 뉴스 데이터 다운로드 중...")
 
     try:
         # URL에서 직접 읽기
@@ -66,24 +66,14 @@ def load_news_from_github(max_items: int = 100) -> list:
 
         st.info(f"📦 다운로드 완료: {len(content):,} bytes")
 
-        # 여러 인코딩 시도
-        df = None
-        for encoding in ['cp949', 'euc-kr', 'utf-8', 'utf-8-sig']:
-            try:
-                decoded = content.decode(encoding)
-                df = pd.read_csv(io.StringIO(decoded))
-                st.success(f"✅ 인코딩 성공: {encoding}")
-                st.info(f"📊 컬럼: {list(df.columns)}")
-                st.info(f"📊 행 수: {len(df)}")
-                break
-            except (UnicodeDecodeError, LookupError) as e:
-                st.warning(f"⚠️ {encoding} 인코딩 실패: {type(e).__name__}")
-                continue
+        # cp949 인코딩으로 디코딩 (일부 잘못된 바이트는 대체)
+        # 한국 뉴스 데이터는 cp949 인코딩
+        decoded = content.decode('cp949', errors='replace')
+        df = pd.read_csv(io.StringIO(decoded))
 
-        if df is None:
-            st.warning("⚠️ 모든 인코딩 실패, errors='ignore'로 시도")
-            decoded = content.decode('utf-8', errors='ignore')
-            df = pd.read_csv(io.StringIO(decoded))
+        st.success(f"✅ 데이터 로드 성공")
+        st.info(f"📊 컬럼: {list(df.columns)[:6]}...")
+        st.info(f"📊 총 {len(df)}개 행")
 
         return _parse_news_dataframe(df, max_items)
 
