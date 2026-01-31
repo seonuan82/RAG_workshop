@@ -47,7 +47,6 @@ DATA_PATH = os.path.join(os.path.dirname(__file__), "Practice_data_NewsResult.CS
 @dataclass
 class NewsItem:
     """뉴스 데이터 클래스"""
-    news_id: str
     date: str
     publisher: str
     title: str
@@ -101,7 +100,6 @@ def load_news_data(filepath: str, max_items: int = 100) -> list:
     # 각 행을 NewsItem으로 변환
     for idx, row in df.iterrows():
         news = NewsItem(
-            news_id=str(row['뉴스 식별자']),
             date=str(row['일자']),
             publisher=str(row['언론사']),
             title=str(row['제목']),
