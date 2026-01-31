@@ -55,26 +55,33 @@ def get_data_path():
 def load_news_from_github(max_items: int = 100) -> list:
     """GitHub에서 뉴스 CSV 데이터를 다운로드하여 로드합니다."""
     import urllib.request
-    import tempfile
     import io
 
-    st.info("📥 GitHub에서 뉴스 데이터 다운로드 중...")
+    st.info(f"📥 GitHub에서 뉴스 데이터 다운로드 중...\n{GITHUB_CSV_URL}")
 
     try:
         # URL에서 직접 읽기
         with urllib.request.urlopen(GITHUB_CSV_URL) as response:
             content = response.read()
 
+        st.info(f"📦 다운로드 완료: {len(content):,} bytes")
+
         # 여러 인코딩 시도
+        df = None
         for encoding in ['cp949', 'euc-kr', 'utf-8', 'utf-8-sig']:
             try:
                 decoded = content.decode(encoding)
                 df = pd.read_csv(io.StringIO(decoded))
-                st.success(f"✅ GitHub에서 데이터 로드 완료 (encoding: {encoding})")
+                st.success(f"✅ 인코딩 성공: {encoding}")
+                st.info(f"📊 컬럼: {list(df.columns)}")
+                st.info(f"📊 행 수: {len(df)}")
                 break
-            except (UnicodeDecodeError, LookupError):
+            except (UnicodeDecodeError, LookupError) as e:
+                st.warning(f"⚠️ {encoding} 인코딩 실패: {type(e).__name__}")
                 continue
-        else:
+
+        if df is None:
+            st.warning("⚠️ 모든 인코딩 실패, errors='ignore'로 시도")
             decoded = content.decode('utf-8', errors='ignore')
             df = pd.read_csv(io.StringIO(decoded))
 
@@ -82,6 +89,8 @@ def load_news_from_github(max_items: int = 100) -> list:
 
     except Exception as e:
         st.error(f"❌ GitHub 다운로드 실패: {e}")
+        import traceback
+        st.error(traceback.format_exc())
         return []
 
 
@@ -154,7 +163,7 @@ def _parse_news_dataframe(df: pd.DataFrame, max_items: int = 100) -> list:
         for col in candidates:
             if col in df.columns:
                 return col
-        return candidates[0]  # 기본값
+        return None  # 찾지 못함
 
     id_col = find_column(col_mapping['news_id'])
     date_col = find_column(col_mapping['date'])
@@ -163,55 +172,47 @@ def _parse_news_dataframe(df: pd.DataFrame, max_items: int = 100) -> list:
     content_col = find_column(col_mapping['content'])
     url_col = find_column(col_mapping['url'])
 
+    # 컬럼 매핑 결과 표시
+    st.info(f"🔍 컬럼 매핑: news_id={id_col}, date={date_col}, publisher={publisher_col}, title={title_col}, content={content_col}, url={url_col}")
+
+    # 필수 컬럼 확인
+    if not title_col or not content_col:
+        st.error(f"❌ 필수 컬럼을 찾을 수 없습니다. 제목={title_col}, 본문={content_col}")
+        st.error(f"📋 사용 가능한 컬럼: {list(df.columns)}")
+        return []
+
     # 각 행을 NewsItem으로 변환
     for _, row in df.iterrows():
         try:
             news = NewsItem(
-                news_id=str(row.get(id_col, '')),
-                date=str(row.get(date_col, '')),
-                publisher=str(row.get(publisher_col, '')),
+                news_id=str(row.get(id_col, '')) if id_col else '',
+                date=str(row.get(date_col, '')) if date_col else '',
+                publisher=str(row.get(publisher_col, '')) if publisher_col else '',
                 title=str(row.get(title_col, '')),
-                content=str(row.get(content_col, '')),  # 본문 전체 저장
-                url=str(row.get(url_col, ''))
+                content=str(row.get(content_col, '')),
+                url=str(row.get(url_col, '')) if url_col else ''
             )
             news_list.append(news)
-        except Exception:
+        except Exception as e:
             continue
 
+    st.success(f"✅ {len(news_list)}개 뉴스 파싱 완료")
     return news_list
 
 
 def load_news_data(filepath: Optional[str] = None, max_items: int = 100) -> list:
     """
-    CSV 파일에서 뉴스 데이터를 로드합니다.
+    GitHub에서 뉴스 데이터를 로드합니다.
 
     Args:
-        filepath: CSV 파일 경로 (None이면 기본 경로 또는 GitHub에서 다운로드)
+        filepath: 사용하지 않음 (호환성 유지용)
         max_items: 로드할 최대 뉴스 수
 
     Returns:
         NewsItem 리스트
     """
-    # 기본 경로 설정
-    load_news_from_github(max_items)
-
-    # 로컬 파일 로드
-    st.info(f"📂 로컬 파일에서 로드: {filepath}")
-
-    # CSV 파일 읽기 (여러 인코딩 시도)
-    for encoding in ['cp949', 'euc-kr', 'utf-8', 'utf-8-sig']:
-        try:
-            df = pd.read_csv(filepath, encoding=encoding)
-            st.success(f"✅ 파일 로드 완료 (encoding: {encoding})")
-            break
-        except (UnicodeDecodeError, LookupError):
-            continue
-    else:
-        # 마지막 수단: 오류 무시
-        df = pd.read_csv(filepath, encoding='utf-8', encoding_errors='ignore')
-        st.warning("⚠️ 파일 로드 완료 (일부 문자 손실 가능)")
-
-    return _parse_news_dataframe(df, max_items)
+    # GitHub에서 다운로드
+    return load_news_from_github(max_items)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
