@@ -17,7 +17,7 @@ RAG 챗봇 실습 파일
 """
 
 import streamlit as st
-from rag_workshop import (
+from 3_RAG_utilities import (
     Config, Chunk, create_llm, SimpleVectorStore, RAGPipeline
 )
 
