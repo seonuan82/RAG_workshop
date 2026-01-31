@@ -41,18 +41,95 @@ st.set_page_config(
 # === 설정 ===
 AVATAR_USER = "👤"
 AVATAR_BOT = "🤖"
+CSV_FILENAME = "Practice_data_NewsResult.CSV"
+# GitHub Raw URL (저장소에 CSV 파일 업로드 후 이 URL 수정 필요)
+GITHUB_CSV_URL = "https://raw.githubusercontent.com/seonuan82/RAG_Workshop/main/Practice_data_NewsResult.CSV"
 
-# 파일 경로 설정 (로컬 및 Streamlit Cloud 모두 지원)
+
 def get_data_path():
-    """데이터 파일 경로를 반환합니다."""
-    current_dir = Path(__file__).parent if "__file__" in dir() else Path(".")
-    local_path = current_dir / "Practice_data_NewsResult.CSV"
-    if local_path.exists():
-        return str(local_path)
-    cloud_path = Path("Practice_data_NewsResult.CSV")
+    """데이터 파일 경로를 반환합니다. (로컬 > 현재 디렉토리 > None)"""
+    try:
+        current_dir = Path(__file__).parent
+        local_path = current_dir / CSV_FILENAME
+        if local_path.exists():
+            return str(local_path)
+    except:
+        pass
+    cloud_path = Path(CSV_FILENAME)
     if cloud_path.exists():
         return str(cloud_path)
-    return "Practice_data_NewsResult.CSV"
+    return None  # GitHub에서 다운로드 필요
+
+
+def load_news_from_github(max_items: int = 100) -> list:
+    """GitHub에서 뉴스 CSV 데이터를 다운로드하여 로드합니다."""
+    import urllib.request
+    import io
+
+    st.info(f"📥 GitHub에서 뉴스 데이터 다운로드 중...")
+
+    try:
+        with urllib.request.urlopen(GITHUB_CSV_URL) as response:
+            content = response.read()
+
+        st.info(f"📦 다운로드 완료: {len(content):,} bytes")
+
+        # cp949 인코딩으로 디코딩 (일부 잘못된 바이트는 대체)
+        decoded = content.decode('cp949', errors='replace')
+        df = pd.read_csv(io.StringIO(decoded))
+
+        st.success(f"✅ 데이터 로드 성공")
+
+        return _parse_news_dataframe(df, max_items)
+
+    except Exception as e:
+        st.error(f"❌ GitHub 다운로드 실패: {e}")
+        return []
+
+
+def _parse_news_dataframe(df: pd.DataFrame, max_items: int = 100) -> list:
+    """DataFrame을 NewsItem 리스트로 변환합니다. (제공됨)"""
+    news_list = []
+    df = df.head(max_items)
+
+    # 컬럼명 매핑 (다양한 CSV 포맷 지원)
+    col_mapping = {
+        'news_id': ['뉴스 식별자', '기사 고유번호', 'news_id', 'id'],
+        'date': ['일자', 'date', '날짜'],
+        'publisher': ['언론사', 'publisher', '매체'],
+        'title': ['제목', 'title'],
+        'content': ['본문', 'content', '내용'],
+        'url': ['URL', 'url', '링크']
+    }
+
+    def find_column(candidates):
+        for col in candidates:
+            if col in df.columns:
+                return col
+        return candidates[0]
+
+    id_col = find_column(col_mapping['news_id'])
+    date_col = find_column(col_mapping['date'])
+    publisher_col = find_column(col_mapping['publisher'])
+    title_col = find_column(col_mapping['title'])
+    content_col = find_column(col_mapping['content'])
+    url_col = find_column(col_mapping['url'])
+
+    for _, row in df.iterrows():
+        try:
+            news = NewsItem(
+                news_id=str(row.get(id_col, '')),
+                date=str(row.get(date_col, '')),
+                publisher=str(row.get(publisher_col, '')),
+                title=str(row.get(title_col, '')),
+                content=str(row.get(content_col, ''))[:500],
+                url=str(row.get(url_col, ''))
+            )
+            news_list.append(news)
+        except:
+            continue
+    return news_list
+
 
 DATA_PATH = get_data_path()
 
@@ -94,27 +171,33 @@ def reset_chat():
 # 실습 1: 뉴스 데이터 로드 함수
 # ═══════════════════════════════════════════════════════════════════════════
 
-def load_news_data(filepath: str, max_items: int = 100) -> list:
+def load_news_data(filepath: Optional[str] = None, max_items: int = 100) -> list:
     """
     CSV 파일에서 뉴스 데이터를 로드합니다.
 
     Args:
-        filepath: CSV 파일 경로
+        filepath: CSV 파일 경로 (None이면 기본 경로 또는 GitHub에서 다운로드)
         max_items: 로드할 최대 뉴스 수
 
     Returns:
         NewsItem 리스트
 
     💡 힌트:
+    - 로컬 파일이 없으면 load_news_from_github() 사용
     - pd.read_csv()로 CSV 파일 읽기 (여러 인코딩 시도: utf-8, cp949, euc-kr)
-    - 각 행을 NewsItem 객체로 변환
-    - 필요한 컬럼: 기사 고유번호, 일자, 언론사, 제목, 본문, URL
+    - _parse_news_dataframe() 함수로 DataFrame을 NewsItem 리스트로 변환
     """
-    news_list = []
-
     # TODO: 뉴스 데이터 로드 구현
     # ──────────────────────────────────────────
-    # 1. CSV 파일 읽기 (여러 인코딩 시도)
+    # 1. 기본 경로 설정
+    #    if filepath is None:
+    #        filepath = DATA_PATH
+    #
+    # 2. 로컬 파일이 없으면 GitHub에서 다운로드
+    #    if filepath is None or not os.path.exists(filepath):
+    #        return load_news_from_github(max_items)
+    #
+    # 3. 로컬 파일 로드 (여러 인코딩 시도)
     #    for encoding in ['utf-8', 'utf-8-sig', 'cp949', 'euc-kr']:
     #        try:
     #            df = pd.read_csv(filepath, encoding=encoding)
@@ -124,23 +207,11 @@ def load_news_data(filepath: str, max_items: int = 100) -> list:
     #    else:
     #        df = pd.read_csv(filepath, encoding='utf-8', encoding_errors='ignore')
     #
-    # 2. 최대 max_items개만 사용
-    #    df = df.head(max_items)
-    #
-    # 3. 각 행을 NewsItem으로 변환
-    #    for idx, row in df.iterrows():
-    #        news = NewsItem(
-    #            news_id=str(row['기사 고유번호']),
-    #            date=str(row['일자']),
-    #            publisher=str(row['언론사']),
-    #            title=str(row['제목']),
-    #            content=str(row['본문'])[:500],  # 본문은 500자로 제한
-    #            url=str(row['URL'])
-    #        )
-    #        news_list.append(news)
+    # 4. DataFrame을 NewsItem 리스트로 변환
+    #    return _parse_news_dataframe(df, max_items)
     # ──────────────────────────────────────────
 
-    return news_list
+    return []
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -485,7 +556,7 @@ with st.sidebar:
         with st.spinner("초기화 중..."):
             try:
                 # 데이터 로드
-                news_data = load_news_data(DATA_PATH, max_items=max_news)
+                news_data = load_news_data(max_items=max_news)
 
                 if not news_data:
                     st.warning("⚠️ load_news_data() 함수를 구현하세요!")
@@ -614,4 +685,3 @@ else:
         })
 
         st.rerun()
-
