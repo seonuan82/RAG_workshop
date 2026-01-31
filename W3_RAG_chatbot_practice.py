@@ -93,7 +93,7 @@ def load_news_data(filepath: str, max_items: int = 100) -> list:
             continue
     else:
         # 마지막 수단: 오류 무시
-        df = pd.read_csv(filepath, encoding='utf-8', errors='ignore')
+        df = pd.read_csv(filepath, encoding='utf-8', encoding_errors='ignore')
 
     # 최대 max_items개만 사용
     df = df.head(max_items)
