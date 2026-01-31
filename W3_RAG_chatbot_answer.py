@@ -66,7 +66,7 @@ def load_news_from_github(max_items: int = 100) -> list:
             content = response.read()
 
         # 여러 인코딩 시도
-        for encoding in ['utf-8', 'utf-8-sig', 'cp949', 'euc-kr']:
+        for encoding in ['cp949', 'euc-kr', 'utf-8', 'utf-8-sig']:
             try:
                 decoded = content.decode(encoding)
                 df = pd.read_csv(io.StringIO(decoded))
