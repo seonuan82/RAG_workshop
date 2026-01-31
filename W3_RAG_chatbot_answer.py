@@ -171,7 +171,7 @@ def _parse_news_dataframe(df: pd.DataFrame, max_items: int = 100) -> list:
                 date=str(row.get(date_col, '')),
                 publisher=str(row.get(publisher_col, '')),
                 title=str(row.get(title_col, '')),
-                content=str(row.get(content_col, ''))[:500],  # 본문은 500자로 제한
+                content=str(row.get(content_col, '')),  # 본문 전체 저장
                 url=str(row.get(url_col, ''))
             )
             news_list.append(news)
@@ -239,10 +239,10 @@ def format_news_data(news_results: list) -> str:
     formatted_list = []
 
     for news, score in news_results:
-        formatted = f"제목: {news.title}, 언론사: {news.publisher}, 날짜: {news.date}\n내용: {news.content[:200]}..."
+        formatted = f"제목: {news.title}\n언론사: {news.publisher}\n날짜: {news.date}\n본문: {news.content}"
         formatted_list.append(formatted)
 
-    return "\n\n".join(formatted_list)
+    return "\n\n---\n\n".join(formatted_list)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -280,10 +280,16 @@ def bm25_score(query_tokens: list, doc_tokens: list,
     return score
 
 
-def bm25_search(query: str, news_data: list, top_k: int = 5) -> list:
+def bm25_search(query: str, news_data: list, top_k: int = 5, k1: float = None, b: float = None) -> list:
     """BM25 알고리즘을 사용하여 관련 뉴스를 검색합니다."""
     if not news_data:
         return []
+
+    # BM25 파라미터 (전역 상수 사용)
+    if k1 is None:
+        k1 = BM25_K1 if 'BM25_K1' in globals() else 1.5
+    if b is None:
+        b = BM25_B if 'BM25_B' in globals() else 0.75
 
     # 1. 쿼리 토큰화
     query_tokens = tokenize(query)
@@ -303,7 +309,7 @@ def bm25_search(query: str, news_data: list, top_k: int = 5) -> list:
     # 5. 각 뉴스에 대해 BM25 스코어 계산
     results = []
     for news, doc_tokens in zip(news_data, news_tokens_list):
-        score = bm25_score(query_tokens, doc_tokens, avg_doc_len, len(news_data), doc_freqs)
+        score = bm25_score(query_tokens, doc_tokens, avg_doc_len, len(news_data), doc_freqs, k1=k1, b=b)
         results.append((news, score))
 
     # 6. 점수순 정렬 및 상위 top_k개 반환
@@ -346,14 +352,14 @@ def semantic_search(query: str, news_data: list, llm, top_k: int = 5) -> list:
 # RAG 파이프라인
 # ═══════════════════════════════════════════════════════════════════════════
 
-def generate_rag_answer(query: str, news_data: list, llm, use_semantic: bool = False) -> dict:
+def generate_rag_answer(query: str, news_data: list, llm, use_semantic: bool = False, top_k: int = 3) -> dict:
     """RAG 파이프라인: 검색 + 생성"""
 
     # 1. 관련 뉴스 검색
     if use_semantic:
-        relevant_news = semantic_search(query, news_data, llm, top_k=3)
+        relevant_news = semantic_search(query, news_data, llm, top_k=top_k)
     else:
-        relevant_news = get_relevant_news(query, news_data, top_k=3)
+        relevant_news = get_relevant_news(query, news_data, top_k=top_k)
 
     if not relevant_news:
         return {
@@ -453,20 +459,34 @@ def create_llm():
         raise ValueError("API 키를 설정하세요 (GOOGLE_API_KEY 또는 OPENAI_API_KEY)")
 
 
+# === RAG 설정 (고정값) ===
+MAX_NEWS_ITEMS = 1000  # 로드할 뉴스 수
+TOP_K_RESULTS = 3      # 검색 결과 수
+BM25_K1 = 1.5          # BM25 파라미터
+BM25_B = 0.75          # BM25 파라미터
+
 # === 사이드바 ===
 with st.sidebar:
     st.header("📰 심리 뉴스 RAG")
 
     st.divider()
 
-    # 데이터 로드 설정
-    max_news = st.slider("로드할 뉴스 수", 10, 200, 50, 10)
+    # RAG 파라미터 표시 (참조용, 수정 불가)
+    with st.expander("⚙️ RAG 파라미터 (참조)", expanded=False):
+        st.markdown(f"""
+        | 파라미터 | 값 |
+        |---------|-----|
+        | 로드 뉴스 수 | **{MAX_NEWS_ITEMS}** |
+        | 검색 결과 수 (top_k) | **{TOP_K_RESULTS}** |
+        | BM25 k1 | **{BM25_K1}** |
+        | BM25 b | **{BM25_B}** |
+        """)
 
     if st.button("🚀 데이터 로드", type="primary", use_container_width=True):
         with st.spinner("초기화 중..."):
             try:
-                # 데이터 로드
-                news_data = load_news_data(max_items=max_news)
+                # 데이터 로드 (1000개 고정)
+                news_data = load_news_data(max_items=MAX_NEWS_ITEMS)
                 st.session_state.news_data = news_data
 
                 # LLM 초기화
@@ -494,7 +514,7 @@ with st.sidebar:
                 with st.spinner("임베딩 생성 중..."):
                     progress = st.progress(0)
                     for i, news in enumerate(st.session_state.news_data):
-                        text = news.title + " " + news.content[:200]
+                        text = news.title + " " + news.content[:500]
                         news.embedding = st.session_state.llm.get_embedding(text)
                         progress.progress((i + 1) / len(st.session_state.news_data))
                     st.session_state.embeddings_ready = True
@@ -540,7 +560,8 @@ else:
         for i, news in enumerate(st.session_state.news_data[:5]):
             st.markdown(f"**{i+1}. {news.title}**")
             st.caption(f"{news.publisher} | {news.date}")
-            st.write(news.content[:150] + "...")
+            st.markdown(f"📄 **본문:**")
+            st.write(news.content)
             st.divider()
 
     # 대화 기록 표시
@@ -571,7 +592,8 @@ else:
                         user_input,
                         st.session_state.news_data,
                         st.session_state.llm,
-                        use_semantic=use_semantic
+                        use_semantic=use_semantic,
+                        top_k=TOP_K_RESULTS
                     )
                     response = result["answer"]
                     sources = result["sources"]
@@ -596,4 +618,3 @@ else:
         })
 
         st.rerun()
-
