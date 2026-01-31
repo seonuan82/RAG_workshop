@@ -81,43 +81,34 @@ def reset_chat():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def load_news_data(filepath: str, max_items: int = 100) -> list:
-    """
-    CSV 파일에서 뉴스 데이터를 로드합니다.
-
-    Args:
-        filepath: CSV 파일 경로
-        max_items: 로드할 최대 뉴스 수
-
-    Returns:
-        NewsItem 리스트
-
-    💡 힌트:
-    - pd.read_csv()로 CSV 파일 읽기 (encoding='cp949' 또는 'euc-kr')
-    - 각 행을 NewsItem 객체로 변환
-    - 필요한 컬럼: 기사 고유번호, 일자, 언론사, 제목, 본문, URL
-    """
+    """CSV 파일에서 뉴스 데이터를 로드합니다."""
     news_list = []
 
-    # TODO: 뉴스 데이터 로드 구현
-    # ──────────────────────────────────────────
-    # 1. CSV 파일 읽기
-    #    df = pd.read_csv(filepath, encoding='cp949')
-    #
-    # 2. 최대 max_items개만 사용
-    #    df = df.head(max_items)
-    #
-    # 3. 각 행을 NewsItem으로 변환
-    #    for idx, row in df.iterrows():
-    #        news = NewsItem(
-    #            news_id=str(row['기사 고유번호']),
-    #            date=str(row['일자']),
-    #            publisher=str(row['언론사']),
-    #            title=str(row['제목']),
-    #            content=str(row['본문'])[:500],  # 본문은 500자로 제한
-    #            url=str(row['URL'])
-    #        )
-    #        news_list.append(news)
-    # ──────────────────────────────────────────
+    # CSV 파일 읽기 (여러 인코딩 시도)
+    for encoding in ['utf-8', 'utf-8-sig', 'cp949', 'euc-kr']:
+        try:
+            df = pd.read_csv(filepath, encoding=encoding)
+            break
+        except (UnicodeDecodeError, LookupError):
+            continue
+    else:
+        # 마지막 수단: 오류 무시
+        df = pd.read_csv(filepath, encoding='utf-8', errors='ignore')
+
+    # 최대 max_items개만 사용
+    df = df.head(max_items)
+
+    # 각 행을 NewsItem으로 변환
+    for idx, row in df.iterrows():
+        news = NewsItem(
+            news_id=str(row['기사 고유번호']),
+            date=str(row['일자']),
+            publisher=str(row['언론사']),
+            title=str(row['제목']),
+            content=str(row['본문'])[:500],  # 본문은 500자로 제한
+            url=str(row['URL'])
+        )
+        news_list.append(news)
 
     return news_list
 
