@@ -10,7 +10,7 @@ OECD 한국 디지털 정부 리뷰 (2025) 문서를 활용한 RAG 실습
 
 import streamlit as st
 import pandas as pd
-from W3_RAG_utilities import (
+from W4_RAG_utilities import (
     Config, Document, Chunk,
     load_oecd_data, create_chunks, create_llm,
     SimpleVectorStore, RAGPipeline, cosine_similarity,
