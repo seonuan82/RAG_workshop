@@ -5,7 +5,7 @@
 """
 
 import streamlit as st
-from 2_Streamlit_chatbot_utilities import get_basic_response, get_revised_response
+from W2_Streamlit_chatbot_utilities import get_basic_response, get_revised_response
 
 # === 설정 ===
 AVATAR_USER = "🎃"
