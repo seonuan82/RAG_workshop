@@ -7,7 +7,7 @@ RAG 챗봇 (파일 업로드 기능 포함)
 """
 
 import streamlit as st
-from 3_RAG_utilities import (
+from W3_RAG_utilities import (
     Config, Chunk, create_llm, SimpleVectorStore, RAGPipeline
 )
 
