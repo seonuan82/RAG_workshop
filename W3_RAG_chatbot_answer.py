@@ -78,8 +78,16 @@ def load_news_data(filepath: str, max_items: int = 100) -> list:
     """CSV 파일에서 뉴스 데이터를 로드합니다."""
     news_list = []
 
-    # CSV 파일 읽기
-    df = pd.read_csv(filepath, encoding='cp949')
+    # CSV 파일 읽기 (여러 인코딩 시도)
+    for encoding in ['utf-8', 'utf-8-sig', 'cp949', 'euc-kr']:
+        try:
+            df = pd.read_csv(filepath, encoding=encoding)
+            break
+        except (UnicodeDecodeError, LookupError):
+            continue
+    else:
+        # 마지막 수단: 오류 무시
+        df = pd.read_csv(filepath, encoding='utf-8', errors='ignore')
 
     # 최대 max_items개만 사용
     df = df.head(max_items)
