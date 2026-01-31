@@ -193,12 +193,7 @@ def load_news_data(filepath: Optional[str] = None, max_items: int = 100) -> list
         NewsItem 리스트
     """
     # 기본 경로 설정
-    if filepath is None:
-        filepath = DATA_PATH
-
-    # 로컬 파일이 없으면 GitHub에서 다운로드
-    if filepath is None or not os.path.exists(filepath):
-        return load_news_from_github(max_items)
+    load_news_from_github(max_items)
 
     # 로컬 파일 로드
     st.info(f"📂 로컬 파일에서 로드: {filepath}")
