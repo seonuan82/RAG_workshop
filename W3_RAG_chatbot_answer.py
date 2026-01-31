@@ -204,7 +204,7 @@ def load_news_data(filepath: Optional[str] = None, max_items: int = 100) -> list
     st.info(f"📂 로컬 파일에서 로드: {filepath}")
 
     # CSV 파일 읽기 (여러 인코딩 시도)
-    for encoding in ['utf-8', 'utf-8-sig', 'cp949', 'euc-kr']:
+    for encoding in ['cp949', 'euc-kr', 'utf-8', 'utf-8-sig']:
         try:
             df = pd.read_csv(filepath, encoding=encoding)
             st.success(f"✅ 파일 로드 완료 (encoding: {encoding})")
