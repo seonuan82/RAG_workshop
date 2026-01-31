@@ -1,38 +1,57 @@
 """
-RAG 챗봇 (파일 업로드 기능 포함)
-================================
+RAG 챗봇 - 심리 뉴스 검색 (정답 버전)
+======================================
 실행: streamlit run rag_chatbot.py
 
-업로드한 문서를 기반으로 질문에 답변하는 RAG 챗봇
+심리 관련 뉴스 데이터를 기반으로 질문에 답변하는 RAG 챗봇
 """
 
 import streamlit as st
-from W3_RAG_utilities import (
-    Config, Chunk, create_llm, SimpleVectorStore, RAGPipeline
-)
+import pandas as pd
+import numpy as np
+import re
+import math
+import os
+from collections import Counter
+from dataclasses import dataclass
+from typing import Optional
 
 # === 페이지 설정 ===
 st.set_page_config(
-    page_title="RAG 챗봇",
-    page_icon="🤖",
+    page_title="RAG 챗봇 - 심리 뉴스",
+    page_icon="📰",
     layout="wide"
 )
 
 # === 설정 ===
 AVATAR_USER = "👤"
 AVATAR_BOT = "🤖"
+DATA_PATH = os.path.join(os.path.dirname(__file__), "Practice_data_NewsResult.CSV")
+
+
+# === 데이터 클래스 ===
+@dataclass
+class NewsItem:
+    """뉴스 데이터 클래스"""
+    news_id: str
+    date: str
+    publisher: str
+    title: str
+    content: str
+    url: str
+    embedding: Optional[list] = None
 
 
 # === 세션 상태 초기화 ===
 def init_session():
     if "messages" not in st.session_state:
         st.session_state.messages = []
-    if "rag" not in st.session_state:
-        st.session_state.rag = None
-    if "chunks" not in st.session_state:
-        st.session_state.chunks = []
+    if "news_data" not in st.session_state:
+        st.session_state.news_data = []
     if "llm" not in st.session_state:
         st.session_state.llm = None
+    if "embeddings_ready" not in st.session_state:
+        st.session_state.embeddings_ready = False
 
 
 init_session()
@@ -46,111 +65,307 @@ def reset_chat():
 def reset_all():
     """전체 초기화"""
     st.session_state.messages = []
-    st.session_state.rag = None
-    st.session_state.chunks = []
+    st.session_state.news_data = []
     st.session_state.llm = None
+    st.session_state.embeddings_ready = False
 
 
-# === 텍스트 청킹 함수 ===
-def create_chunks_from_text(text: str, filename: str, chunk_size: int = 500, overlap: int = 100) -> list[Chunk]:
-    """텍스트를 청크로 분할"""
-    chunks = []
-    start = 0
-    chunk_idx = 0
+# ═══════════════════════════════════════════════════════════════════════════
+# 뉴스 데이터 로드 함수
+# ═══════════════════════════════════════════════════════════════════════════
 
-    while start < len(text):
-        end = start + chunk_size
-        chunk_text = text[start:end]
+def load_news_data(filepath: str, max_items: int = 100) -> list:
+    """CSV 파일에서 뉴스 데이터를 로드합니다."""
+    news_list = []
 
-        # 문장 경계에서 자르기
-        if end < len(text):
-            last_period = chunk_text.rfind('.')
-            if last_period > chunk_size // 2:
-                chunk_text = chunk_text[:last_period + 1]
-                end = start + last_period + 1
+    # CSV 파일 읽기
+    df = pd.read_csv(filepath, encoding='cp949')
 
-        chunk = Chunk(
-            chunk_id=f"{filename}_chunk_{chunk_idx}",
-            doc_id=filename,
-            title=filename,
-            content=chunk_text.strip()
+    # 최대 max_items개만 사용
+    df = df.head(max_items)
+
+    # 각 행을 NewsItem으로 변환
+    for idx, row in df.iterrows():
+        news = NewsItem(
+            news_id=str(row['기사 고유번호']),
+            date=str(row['일자']),
+            publisher=str(row['언론사']),
+            title=str(row['제목']),
+            content=str(row['본문'])[:500],  # 본문은 500자로 제한
+            url=str(row['URL'])
         )
-        chunks.append(chunk)
+        news_list.append(news)
 
-        start = end - overlap
-        chunk_idx += 1
+    return news_list
 
-    return chunks
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 관련 뉴스 가져오기
+# ═══════════════════════════════════════════════════════════════════════════
+
+def get_relevant_news(query: str, news_data: list, top_k: int = 5) -> list:
+    """쿼리와 관련된 뉴스를 검색합니다."""
+    # BM25 검색 사용
+    results = bm25_search(query, news_data, top_k)
+    return results
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 뉴스 데이터 포맷팅
+# ═══════════════════════════════════════════════════════════════════════════
+
+def format_news_data(news_results: list) -> str:
+    """검색된 뉴스를 문자열로 포맷팅합니다."""
+    formatted_list = []
+
+    for news, score in news_results:
+        formatted = f"제목: {news.title}, 언론사: {news.publisher}, 날짜: {news.date}\n내용: {news.content[:200]}..."
+        formatted_list.append(formatted)
+
+    return "\n\n".join(formatted_list)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BM25 검색
+# ═══════════════════════════════════════════════════════════════════════════
+
+def tokenize(text: str) -> list:
+    """간단한 토크나이저"""
+    text = text.lower()
+    text = re.sub(r'[^\w\s가-힣]', ' ', text)
+    tokens = text.split()
+    stopwords = {'the', 'a', 'an', 'is', 'are', 'was', 'were',
+                 '은', '는', '이', '가', '을', '를', '의', '에', '에서', '으로', '로', '와', '과', '도', '한', '있다', '하다'}
+    return [t for t in tokens if t not in stopwords and len(t) > 1]
+
+
+def bm25_score(query_tokens: list, doc_tokens: list,
+               avg_doc_len: float, doc_count: int, doc_freqs: dict,
+               k1: float = 1.5, b: float = 0.75) -> float:
+    """BM25 스코어 계산"""
+    score = 0.0
+    doc_len = len(doc_tokens)
+    doc_token_counts = Counter(doc_tokens)
+
+    for token in query_tokens:
+        if token not in doc_token_counts:
+            continue
+        tf = doc_token_counts[token]
+        df = doc_freqs.get(token, 0)
+        idf = math.log((doc_count - df + 0.5) / (df + 0.5) + 1)
+        numerator = tf * (k1 + 1)
+        denominator = tf + k1 * (1 - b + b * (doc_len / avg_doc_len))
+        score += idf * (numerator / denominator)
+
+    return score
+
+
+def bm25_search(query: str, news_data: list, top_k: int = 5) -> list:
+    """BM25 알고리즘을 사용하여 관련 뉴스를 검색합니다."""
+    if not news_data:
+        return []
+
+    # 1. 쿼리 토큰화
+    query_tokens = tokenize(query)
+
+    # 2. 모든 뉴스의 텍스트 토큰화 (제목 + 내용)
+    news_tokens_list = [tokenize(news.title + " " + news.content) for news in news_data]
+
+    # 3. 문서 빈도 계산 (IDF용)
+    doc_freqs = Counter()
+    for tokens in news_tokens_list:
+        for token in set(tokens):
+            doc_freqs[token] += 1
+
+    # 4. 평균 문서 길이 계산
+    avg_doc_len = sum(len(t) for t in news_tokens_list) / len(news_data)
+
+    # 5. 각 뉴스에 대해 BM25 스코어 계산
+    results = []
+    for news, doc_tokens in zip(news_data, news_tokens_list):
+        score = bm25_score(query_tokens, doc_tokens, avg_doc_len, len(news_data), doc_freqs)
+        results.append((news, score))
+
+    # 6. 점수순 정렬 및 상위 top_k개 반환
+    results.sort(key=lambda x: x[1], reverse=True)
+    return results[:top_k]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Semantic Search
+# ═══════════════════════════════════════════════════════════════════════════
+
+def cosine_similarity(a: list, b: list) -> float:
+    """코사인 유사도 계산"""
+    a = np.array(a)
+    b = np.array(b)
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+
+def semantic_search(query: str, news_data: list, llm, top_k: int = 5) -> list:
+    """임베딩 기반 시맨틱 검색을 수행합니다."""
+    if not news_data:
+        return []
+
+    # 1. 쿼리 임베딩 생성
+    query_embedding = llm.get_embedding(query)
+
+    # 2. 각 뉴스와 유사도 계산
+    results = []
+    for news in news_data:
+        if news.embedding:
+            sim = cosine_similarity(query_embedding, news.embedding)
+            results.append((news, sim))
+
+    # 3. 점수순 정렬 및 상위 top_k개 반환
+    results.sort(key=lambda x: x[1], reverse=True)
+    return results[:top_k]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# RAG 파이프라인
+# ═══════════════════════════════════════════════════════════════════════════
+
+def generate_rag_answer(query: str, news_data: list, llm, use_semantic: bool = False) -> dict:
+    """RAG 파이프라인: 검색 + 생성"""
+
+    # 1. 관련 뉴스 검색
+    if use_semantic:
+        relevant_news = semantic_search(query, news_data, llm, top_k=3)
+    else:
+        relevant_news = get_relevant_news(query, news_data, top_k=3)
+
+    if not relevant_news:
+        return {
+            "answer": "관련 뉴스를 찾을 수 없습니다.",
+            "sources": []
+        }
+
+    # 2. 컨텍스트 포맷팅
+    context = format_news_data(relevant_news)
+
+    # 3. 프롬프트 생성 및 답변 생성
+    prompt = f"""다음 뉴스 기사들을 참고하여 질문에 답변하세요. 한국어로 답변해주세요.
+
+뉴스 기사:
+{context}
+
+질문: {query}
+
+답변:"""
+
+    answer = llm.generate(prompt)
+
+    return {
+        "answer": answer,
+        "sources": [(news.title, news.publisher, news.date) for news, _ in relevant_news]
+    }
+
+
+# === LLM 클래스 ===
+def get_secret(key: str):
+    try:
+        return st.secrets.get(key) or os.getenv(key)
+    except:
+        return os.getenv(key)
+
+
+class GeminiLLM:
+    def __init__(self, model: str = "gemini-2.5-flash"):
+        from google import genai
+        api_key = get_secret("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError("GOOGLE_API_KEY를 설정하세요")
+        self.client = genai.Client(api_key=api_key)
+        self.model = model
+        self.embed_model = "text-embedding-004"
+
+    def generate(self, prompt: str) -> str:
+        response = self.client.models.generate_content(model=self.model, contents=prompt)
+        return response.text
+
+    def get_embedding(self, text: str) -> list:
+        response = self.client.models.embed_content(model=self.embed_model, contents=text)
+        return response.embeddings[0].values
+
+
+class OpenAILLM:
+    def __init__(self, model: str = "gpt-5", embedding_model: str = "text-embedding-3-small"):
+        from openai import OpenAI
+        api_key = get_secret("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY를 설정하세요")
+        self.client = OpenAI(api_key=api_key)
+        self.model = model
+        self.embedding_model = embedding_model
+
+    def generate(self, prompt: str) -> str:
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message.content
+
+    def get_embedding(self, text: str) -> list:
+        response = self.client.embeddings.create(model=self.embedding_model, input=text)
+        return response.data[0].embedding
+
+
+def create_llm():
+    if get_secret("GOOGLE_API_KEY"):
+        return GeminiLLM()
+    elif get_secret("OPENAI_API_KEY"):
+        return OpenAILLM()
+    else:
+        raise ValueError("API 키를 설정하세요 (GOOGLE_API_KEY 또는 OPENAI_API_KEY)")
 
 
 # === 사이드바 ===
 with st.sidebar:
-    st.header("📁 문서 업로드")
-
-    # 파일 업로드
-    uploaded_files = st.file_uploader(
-        "텍스트 파일 업로드",
-        type=["txt"],
-        accept_multiple_files=True,
-        help="txt 파일을 업로드하세요"
-    )
-
-    # 청킹 설정
-    st.subheader("⚙️ 설정")
-    chunk_size = st.slider("청크 크기", 200, 1000, 500, 100)
-    chunk_overlap = st.slider("청크 오버랩", 0, 200, 100, 50)
-    top_k = st.slider("검색 문서 수 (Top-K)", 1, 10, 3)
+    st.header("📰 심리 뉴스 RAG")
 
     st.divider()
 
-    # 초기화 버튼
-    if st.button("🚀 RAG 초기화", type="primary", use_container_width=True):
-        if not uploaded_files:
-            st.warning("파일을 먼저 업로드하세요.")
-        else:
-            with st.spinner("초기화 중..."):
-                try:
-                    # Config 설정
-                    config = Config(
-                        chunk_size=chunk_size,
-                        chunk_overlap=chunk_overlap,
-                        top_k=top_k
-                    )
+    # 데이터 로드 설정
+    max_news = st.slider("로드할 뉴스 수", 10, 200, 50, 10)
 
-                    # 파일에서 텍스트 추출 및 청킹
-                    all_chunks = []
-                    for file in uploaded_files:
-                        content = file.read().decode('utf-8')
-                        file_chunks = create_chunks_from_text(
-                            content, file.name, chunk_size, chunk_overlap
-                        )
-                        all_chunks.extend(file_chunks)
+    if st.button("🚀 데이터 로드", type="primary", use_container_width=True):
+        with st.spinner("초기화 중..."):
+            try:
+                # 데이터 로드
+                news_data = load_news_data(DATA_PATH, max_items=max_news)
+                st.session_state.news_data = news_data
 
-                    st.session_state.chunks = all_chunks
+                # LLM 초기화
+                llm = create_llm()
+                st.session_state.llm = llm
 
-                    # LLM 초기화
-                    llm = create_llm(config)
-                    st.session_state.llm = llm
+                st.success(f"✅ {len(news_data)}개 뉴스 로드 완료!")
 
-                    # 벡터 저장소 및 RAG 파이프라인
-                    vector_store = SimpleVectorStore()
+            except Exception as e:
+                st.error(f"❌ 오류: {e}")
 
-                    # 임베딩 생성
+    st.divider()
+
+    # 검색 방식 선택
+    search_method = st.radio(
+        "검색 방식",
+        ["BM25 (키워드)", "Semantic (임베딩)"],
+        index=0
+    )
+
+    # 임베딩 생성 (Semantic Search용)
+    if st.session_state.news_data and st.session_state.llm:
+        if search_method == "Semantic (임베딩)" and not st.session_state.embeddings_ready:
+            if st.button("🧠 임베딩 생성", use_container_width=True):
+                with st.spinner("임베딩 생성 중..."):
                     progress = st.progress(0)
-                    for i, chunk in enumerate(all_chunks):
-                        chunk.embedding = llm.get_embedding(chunk.content)
-                        progress.progress((i + 1) / len(all_chunks))
-
-                    vector_store.add_chunks(all_chunks)
-
-                    # RAG 파이프라인 생성
-                    rag = RAGPipeline(llm, vector_store, config)
-                    st.session_state.rag = rag
-
-                    st.success(f"✅ {len(uploaded_files)}개 파일, {len(all_chunks)}개 청크 처리 완료!")
-
-                except Exception as e:
-                    st.error(f"❌ 오류: {e}")
+                    for i, news in enumerate(st.session_state.news_data):
+                        text = news.title + " " + news.content[:200]
+                        news.embedding = st.session_state.llm.get_embedding(text)
+                        progress.progress((i + 1) / len(st.session_state.news_data))
+                    st.session_state.embeddings_ready = True
+                    st.success("✅ 임베딩 생성 완료!")
 
     st.divider()
 
@@ -162,31 +377,50 @@ with st.sidebar:
         st.button("🗑️ 전체 초기화", on_click=reset_all, use_container_width=True)
 
     # 상태 표시
-    if st.session_state.rag:
-        st.success(f"📚 {len(st.session_state.chunks)}개 청크 준비됨")
+    if st.session_state.news_data:
+        st.success(f"📚 {len(st.session_state.news_data)}개 뉴스 준비됨")
+        if st.session_state.embeddings_ready:
+            st.success("🧠 임베딩 준비됨")
 
 
 # === 메인 영역 ===
-st.title("🤖 RAG 챗봇")
+st.title("📰 RAG 챗봇 - 심리 뉴스")
 
-if not st.session_state.rag:
-    st.info("👈 사이드바에서 문서를 업로드하고 'RAG 초기화'를 클릭하세요.")
+st.markdown("""
+심리 관련 뉴스 데이터를 기반으로 질문에 답변합니다.
+
+**예시 질문:**
+- "정신건강 관련 최신 뉴스는?"
+- "심리상담 트렌드는?"
+- "우울증 치료 관련 뉴스"
+- "청소년 심리 문제"
+- "직장인 스트레스 관련 기사"
+""")
+
+st.divider()
+
+if not st.session_state.news_data:
+    st.info("👈 사이드바에서 '데이터 로드'를 클릭하세요.")
 else:
+    # 데이터 미리보기
+    with st.expander("📊 로드된 뉴스 미리보기"):
+        for i, news in enumerate(st.session_state.news_data[:5]):
+            st.markdown(f"**{i+1}. {news.title}**")
+            st.caption(f"{news.publisher} | {news.date}")
+            st.write(news.content[:150] + "...")
+            st.divider()
+
     # 대화 기록 표시
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"], avatar=msg.get("avatar")):
             st.markdown(msg["content"])
-
-            # 참조 문서 표시
             if msg.get("sources"):
-                with st.expander("📚 참조 문서"):
-                    for i, source in enumerate(msg["sources"]):
-                        st.markdown(f"**{i+1}. {source['title']}**")
-                        st.caption(source["content"])
+                with st.expander("📚 참조 뉴스"):
+                    for title, publisher, date in msg["sources"]:
+                        st.markdown(f"**{title}** ({publisher}, {date})")
 
     # 사용자 입력
-    if user_input := st.chat_input("질문을 입력하세요"):
-        # 사용자 메시지 저장 및 표시
+    if user_input := st.chat_input("심리 관련 뉴스에 대해 질문하세요"):
         st.session_state.messages.append({
             "role": "user",
             "content": user_input,
@@ -195,28 +429,32 @@ else:
         with st.chat_message("user", avatar=AVATAR_USER):
             st.markdown(user_input)
 
-        # RAG 응답 생성
         with st.chat_message("assistant", avatar=AVATAR_BOT):
             with st.spinner("답변 생성 중..."):
                 try:
-                    result = st.session_state.rag.query(user_input)
+                    use_semantic = (search_method == "Semantic (임베딩)" and st.session_state.embeddings_ready)
+
+                    result = generate_rag_answer(
+                        user_input,
+                        st.session_state.news_data,
+                        st.session_state.llm,
+                        use_semantic=use_semantic
+                    )
                     response = result["answer"]
                     sources = result["sources"]
 
                     st.markdown(response)
 
-                    # 참조 문서 표시
-                    with st.expander("📚 참조 문서"):
-                        for i, source in enumerate(sources):
-                            st.markdown(f"**{i+1}. {source['title']}**")
-                            st.caption(source["content"])
+                    if sources:
+                        with st.expander("📚 참조 뉴스"):
+                            for title, publisher, date in sources:
+                                st.markdown(f"**{title}** ({publisher}, {date})")
 
                 except Exception as e:
-                    response = f"⚠️ 오류가 발생했습니다: {str(e)}"
+                    response = f"⚠️ 오류: {str(e)}"
                     sources = []
                     st.error(response)
 
-        # 어시스턴트 메시지 저장
         st.session_state.messages.append({
             "role": "assistant",
             "content": response,
