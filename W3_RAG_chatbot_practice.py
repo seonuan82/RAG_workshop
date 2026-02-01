@@ -4,13 +4,11 @@ RAG 챗봇 실습 파일 - 심리 뉴스 검색
 실행: streamlit run rag_chatbot_practice.py
 
 📝 실습 목표:
-1. 뉴스 데이터 로드 및 전처리
-2. get_relevant_news() 함수 구현 (C1M1 스타일)
-3. format_news_data() 함수 구현 (C1M1 스타일)
-4. bm25_search() 함수 구현 (C1M2 스타일)
-5. semantic_search() 함수 구현 (C1M2 스타일)
+1. get_relevant_news() 함수 구현
+2. bm25_search() 함수 구현
+3. semantic_search() 함수 구현
 
-💡 데이터: Practice_data_NewsResult.CSV (심리 키워드 뉴스 3개월치)
+💡 데이터: Practice_data_NewsResult.CSV (심리 키워드 뉴스 1개월치)
 
 🔍 예시 질문:
 - "정신건강 관련 최신 뉴스는?"
@@ -157,6 +155,8 @@ def init_session():
         st.session_state.llm = None
     if "embeddings_ready" not in st.session_state:
         st.session_state.embeddings_ready = False
+    if "pending_response" not in st.session_state:
+        st.session_state.pending_response = False
 
 
 init_session()
@@ -167,124 +167,91 @@ def reset_chat():
     st.session_state.messages = []
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# 실습 1: 뉴스 데이터 로드 함수
-# ═══════════════════════════════════════════════════════════════════════════
+def _parse_news_dataframe(df: pd.DataFrame, max_items: int = 100) -> list:
+    """DataFrame을 NewsItem 리스트로 변환합니다."""
+    news_list = []
+
+    # 최대 max_items개만 사용
+    df = df.head(max_items)
+
+    # 컬럼명 확인 및 매핑 (다양한 CSV 포맷 지원) -------------------------------------------------- BM25 함수 뉴스 토큰화 때 참고!
+    col_mapping = {
+        'news_id': ['뉴스 식별자', '기사 고유번호', 'news_id', 'id'],
+        'date': ['일자', 'date', '날짜'],
+        'publisher': ['언론사', 'publisher', '매체'],
+        'title': ['제목', 'title'],
+        'content': ['본문', 'content', '내용'],
+        'url': ['URL', 'url', '링크']
+    }
+
+    def find_column(candidates):
+        for col in candidates:
+            if col in df.columns:
+                return col
+        return None  # 찾지 못함
+
+    id_col = find_column(col_mapping['news_id'])
+    date_col = find_column(col_mapping['date'])
+    publisher_col = find_column(col_mapping['publisher'])
+    title_col = find_column(col_mapping['title'])
+    content_col = find_column(col_mapping['content'])
+    url_col = find_column(col_mapping['url'])
+
+    # 컬럼 매핑 결과 표시
+    st.info(f"🔍 컬럼 매핑: news_id={id_col}, date={date_col}, publisher={publisher_col}, title={title_col}, content={content_col}, url={url_col}")
+
+    # 필수 컬럼 확인
+    if not title_col or not content_col:
+        st.error(f"❌ 필수 컬럼을 찾을 수 없습니다. 제목={title_col}, 본문={content_col}")
+        st.error(f"📋 사용 가능한 컬럼: {list(df.columns)}")
+        return []
+
+    # 각 행을 NewsItem으로 변환
+    for _, row in df.iterrows():
+        try:
+            news = NewsItem(
+                news_id=str(row.get(id_col, '')) if id_col else '',
+                date=str(row.get(date_col, '')) if date_col else '',
+                publisher=str(row.get(publisher_col, '')) if publisher_col else '',
+                title=str(row.get(title_col, '')),
+                content=str(row.get(content_col, '')),
+                url=str(row.get(url_col, '')) if url_col else ''
+            )
+            news_list.append(news)
+        except Exception as e:
+            continue
+
+    st.success(f"✅ {len(news_list)}개 뉴스 파싱 완료")
+    return news_list
+
 
 def load_news_data(filepath: Optional[str] = None, max_items: int = 100) -> list:
     """
-    CSV 파일에서 뉴스 데이터를 로드합니다.
+    GitHub에서 뉴스 데이터를 로드합니다.
 
     Args:
-        filepath: CSV 파일 경로 (None이면 기본 경로 또는 GitHub에서 다운로드)
+        filepath: 사용하지 않음 (호환성 유지용)
         max_items: 로드할 최대 뉴스 수
 
     Returns:
         NewsItem 리스트
-
-    💡 힌트:
-    - 로컬 파일이 없으면 load_news_from_github() 사용
-    - pd.read_csv()로 CSV 파일 읽기 (여러 인코딩 시도: utf-8, cp949, euc-kr)
-    - _parse_news_dataframe() 함수로 DataFrame을 NewsItem 리스트로 변환
     """
-    # TODO: 뉴스 데이터 로드 구현
-    # ──────────────────────────────────────────
-    # 1. 기본 경로 설정
-    #    if filepath is None:
-    #        filepath = DATA_PATH
-    #
-    # 2. 로컬 파일이 없으면 GitHub에서 다운로드
-    #    if filepath is None or not os.path.exists(filepath):
-    #        return load_news_from_github(max_items)
-    #
-    # 3. 로컬 파일 로드 (여러 인코딩 시도)
-    #    for encoding in ['utf-8', 'utf-8-sig', 'cp949', 'euc-kr']:
-    #        try:
-    #            df = pd.read_csv(filepath, encoding=encoding)
-    #            break
-    #        except (UnicodeDecodeError, LookupError):
-    #            continue
-    #    else:
-    #        df = pd.read_csv(filepath, encoding='utf-8', encoding_errors='ignore')
-    #
-    # 4. DataFrame을 NewsItem 리스트로 변환
-    #    return _parse_news_dataframe(df, max_items)
-    # ──────────────────────────────────────────
-
-    return []
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 실습 2: 관련 뉴스 가져오기 (C1M1 Exercise 1 스타일)
-# ═══════════════════════════════════════════════════════════════════════════
-
-def get_relevant_news(query: str, news_data: list, top_k: int = 5) -> list:
-    """
-    쿼리와 관련된 뉴스를 검색합니다.
-
-    Args:
-        query: 검색 쿼리
-        news_data: NewsItem 리스트
-        top_k: 반환할 뉴스 수
-
-    Returns:
-        관련 뉴스 리스트 [(NewsItem, score), ...]
-
-    💡 힌트:
-    - bm25_search() 또는 semantic_search() 함수 사용
-    - 결과를 점수 순으로 정렬하여 상위 top_k개 반환
-    """
-    # TODO: 관련 뉴스 검색 구현
-    # ──────────────────────────────────────────
-    # 1. 검색 함수 호출 (bm25_search 또는 semantic_search)
-    #    results = bm25_search(query, news_data, top_k)
-    #
-    # 2. 결과 반환
-    #    return results
-    # ──────────────────────────────────────────
-
-    return []
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 실습 3: 뉴스 데이터 포맷팅 (C1M1 Exercise 2 스타일)
-# ═══════════════════════════════════════════════════════════════════════════
+    # GitHub에서 다운로드
+    return load_news_from_github(max_items)
 
 def format_news_data(news_results: list) -> str:
-    """
-    검색된 뉴스를 문자열로 포맷팅합니다.
+    """검색된 뉴스를 문자열로 포맷팅합니다."""
+    formatted_list = []
 
-    Args:
-        news_results: [(NewsItem, score), ...] 형태의 리스트
+    for news, score in news_results:
+        formatted = f"제목: {news.title}\n언론사: {news.publisher}\n날짜: {news.date}\n본문: {news.content}"
+        formatted_list.append(formatted)
 
-    Returns:
-        포맷팅된 문자열
-
-    💡 힌트:
-    - 각 뉴스의 제목, 날짜, 언론사, 내용을 포함
-    - 예시 형식:
-      "제목: {title}, 언론사: {publisher}, 날짜: {date}
-       내용: {content}..."
-    """
-    # TODO: 뉴스 포맷팅 구현
-    # ──────────────────────────────────────────
-    # 1. 빈 리스트 생성
-    #    formatted_list = []
-    #
-    # 2. 각 뉴스 포맷팅
-    #    for news, score in news_results:
-    #        formatted = f"제목: {news.title}, 언론사: {news.publisher}, 날짜: {news.date}\n내용: {news.content[:200]}..."
-    #        formatted_list.append(formatted)
-    #
-    # 3. 줄바꿈으로 연결하여 반환
-    #    return "\n\n".join(formatted_list)
-    # ──────────────────────────────────────────
-
-    return ""
+    return "\n\n---\n\n".join(formatted_list)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 실습 4: BM25 검색 (C1M2 Exercise 1 스타일)
+# 실습 1: BM25 검색 함수 구현
 # ═══════════════════════════════════════════════════════════════════════════
 
 def tokenize(text: str) -> list:
@@ -330,9 +297,9 @@ def bm25_search(query: str, news_data: list, top_k: int = 5) -> list:
     Returns:
         [(NewsItem, score), ...] 리스트
 
-    💡 힌트 (C1M2 Exercise 1 참고):
+    💡 힌트:
     1. 쿼리 토큰화: tokenize(query)
-    2. 모든 뉴스 토큰화: [tokenize(news.title + " " + news.content) for news in news_data]
+    2. 모든 뉴스 토큰화: [tokenize() for 00 in 000]
     3. 문서 빈도(doc_freqs) 계산
     4. 평균 문서 길이 계산
     5. 각 뉴스에 대해 bm25_score() 계산
@@ -344,36 +311,31 @@ def bm25_search(query: str, news_data: list, top_k: int = 5) -> list:
     # TODO: BM25 검색 구현
     # ──────────────────────────────────────────
     # 1. 쿼리 토큰화
-    #    query_tokens = tokenize(query)
+    #    query_tokens = 00000000
     #
     # 2. 모든 뉴스의 텍스트 토큰화 (제목 + 내용)
-    #    news_tokens_list = [tokenize(news.title + " " + news.content) for news in news_data]
+    #    news_tokens_list = 00000000
     #
     # 3. 문서 빈도 계산 (IDF용)
-    #    doc_freqs = Counter()
-    #    for tokens in news_tokens_list:
-    #        for token in set(tokens):
-    #            doc_freqs[token] += 1
+    #    0000
     #
     # 4. 평균 문서 길이 계산
-    #    avg_doc_len = sum(len(t) for t in news_tokens_list) / len(news_data)
+    #    avg_doc_len = 000000000
     #
     # 5. 각 뉴스에 대해 BM25 스코어 계산
     #    results = []
-    #    for news, doc_tokens in zip(news_data, news_tokens_list):
-    #        score = bm25_score(query_tokens, doc_tokens, avg_doc_len, len(news_data), doc_freqs)
-    #        results.append((news, score))
+    #    00000000
     #
     # 6. 점수순 정렬 및 상위 top_k개 반환
-    #    results.sort(key=lambda x: x[1], reverse=True)
-    #    return results[:top_k]
+    #    0000000000
+    #    return 00000000
     # ──────────────────────────────────────────
 
     return []
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 실습 5: Semantic Search (C1M2 Exercise 2 스타일)
+# 실습 2: Semantic Search 함수 구현
 # ═══════════════════════════════════════════════════════════════════════════
 
 def cosine_similarity(a: list, b: list) -> float:
@@ -396,7 +358,7 @@ def semantic_search(query: str, news_data: list, llm, top_k: int = 5) -> list:
     Returns:
         [(NewsItem, score), ...] 리스트
 
-    💡 힌트 (C1M2 Exercise 2 참고):
+    💡 힌트:
     1. 쿼리 임베딩 생성: llm.get_embedding(query)
     2. 각 뉴스의 임베딩과 코사인 유사도 계산
     3. 점수순 정렬 후 상위 top_k개 반환
@@ -407,32 +369,66 @@ def semantic_search(query: str, news_data: list, llm, top_k: int = 5) -> list:
     # TODO: Semantic Search 구현
     # ──────────────────────────────────────────
     # 1. 쿼리 임베딩 생성
-    #    query_embedding = llm.get_embedding(query)
+    #    query_embedding = 0000000
     #
     # 2. 각 뉴스와 유사도 계산
     #    results = []
-    #    for news in news_data:
-    #        if news.embedding:
-    #            sim = cosine_similarity(query_embedding, news.embedding)
-    #            results.append((news, sim))
+    #    000000000
     #
     # 3. 점수순 정렬 및 상위 top_k개 반환
-    #    results.sort(key=lambda x: x[1], reverse=True)
-    #    return results[:top_k]
+    #    000000000
+    #    return 00000000
     # ──────────────────────────────────────────
 
     return []
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# RAG 파이프라인 (제공됨)
+# 실습 3: 관련 뉴스 가져오기
+# ═══════════════════════════════════════════════════════════════════════════
+
+def get_relevant_news(query: str, news_data: list, top_k: int = 5) -> list:
+    """
+    쿼리와 관련된 뉴스를 검색합니다.
+
+    Args:
+        query: 검색 쿼리
+        news_data: NewsItem 리스트
+        top_k: 반환할 뉴스 수
+
+    Returns:
+        관련 뉴스 리스트 [(NewsItem, score), ...]
+
+    💡 힌트:
+    - bm25_search() 또는 semantic_search() 함수 사용
+    - 결과를 점수 순으로 정렬하여 상위 top_k개 반환
+    
+    추가 실습
+    - top_k 수정해 보기!
+    """
+    # TODO: 관련 뉴스 검색 구현
+    # ──────────────────────────────────────────
+    # 1. 검색 함수 호출 (bm25_search 또는 semantic_search)
+    #    results = 00000000
+    #
+    # 2. 결과 반환
+    #    return 00000000
+    # ──────────────────────────────────────────
+
+    return []
+
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 선택 실습: top_k 등 RAG 파라미터 수정해 보기
 # ═══════════════════════════════════════════════════════════════════════════
 
 def generate_rag_answer(query: str, news_data: list, llm) -> dict:
     """RAG 파이프라인: 검색 + 생성"""
 
     # 1. 관련 뉴스 검색
-    relevant_news = get_relevant_news(query, news_data, top_k=3)
+    relevant_news = get_relevant_news(query, news_data, top_k=3)  # ---------------------- top_k 수정 가능
 
     if not relevant_news:
         return {
@@ -449,7 +445,7 @@ def generate_rag_answer(query: str, news_data: list, llm) -> dict:
             "sources": []
         }
 
-    # 3. 프롬프트 생성 및 답변 생성
+    # 3. 프롬프트 생성 및 답변 생성 # --------------------------------------------------------- 챗봇 프롬프트 수정 가능
     prompt = f"""다음 뉴스 기사들을 참고하여 질문에 답변하세요.
 
 뉴스 기사:
@@ -482,7 +478,7 @@ def get_secret(key: str):
 
 
 class GeminiLLM:
-    def __init__(self, model: str = "gemini-2.0-flash"):
+    def __init__(self, model: str = "gemini-2.5-flash"):
         from google import genai
         api_key = get_secret("GOOGLE_API_KEY")
         if not api_key:
@@ -501,7 +497,7 @@ class GeminiLLM:
 
 
 class OpenAILLM:
-    def __init__(self, model: str = "gpt-4o-mini", embedding_model: str = "text-embedding-3-small"):
+    def __init__(self, model: str = "gpt-5-mini", embedding_model: str = "text-embedding-3-small"):
         from openai import OpenAI
         api_key = get_secret("OPENAI_API_KEY")
         if not api_key:
@@ -540,11 +536,9 @@ with st.sidebar:
 
     st.markdown("""
     ### 실습 순서
-    1. **load_news_data()** - 뉴스 로드
-    2. **get_relevant_news()** - 검색
-    3. **format_news_data()** - 포맷팅
-    4. **bm25_search()** - BM25 검색
-    5. **semantic_search()** - 시맨틱 검색
+    1. **get_relevant_news()** - 검색
+    2. **bm25_search()** - BM25 검색
+    3. **semantic_search()** - 시맨틱 검색
     """)
 
     st.divider()
@@ -596,30 +590,26 @@ with st.sidebar:
             st.success("🧠 임베딩 준비됨")
 
 
-# === 메인 영역 ===
+# === 메인 영역 (앱 UI) ===
 st.title("📰 RAG 챗봇 실습 - 심리 뉴스")
 
 st.markdown("""
-### 실습 안내
-
-이 실습에서는 **심리 관련 뉴스 데이터**를 사용하여 RAG 시스템을 구현합니다.
+### 실습: **심리 관련 뉴스 데이터**를 사용하여 RAG 시스템을 구현하는 챗봇 만들어 보기.
 
 #### 📋 구현해야 할 함수들:
-1. `load_news_data()` - CSV에서 뉴스 데이터 로드
-2. `get_relevant_news()` - 관련 뉴스 검색 (C1M1 Exercise 1)
-3. `format_news_data()` - 뉴스 포맷팅 (C1M1 Exercise 2)
-4. `bm25_search()` - BM25 키워드 검색 (C1M2 Exercise 1)
-5. `semantic_search()` - 시맨틱 검색 (C1M2 Exercise 2)
+1. `get_relevant_news()` - 관련 뉴스 검색
+2. `bm25_search()` - BM25 키워드 검색
+3. `semantic_search()` - 시맨틱 검색
 
-#### 🔍 예시 질문:
+💡 구글 코랩을 활용해서 실습해 보세요!
+
+#### 🔍 챗봇에게 물어볼 수 있는 질문 예시:
 - "정신건강 관련 최신 뉴스는?"
 - "심리상담 트렌드는?"
 - "우울증 치료 관련 뉴스"
 - "청소년 심리 문제"
 - "직장인 스트레스 관련 기사"
 - "심리치료사 관련 정책"
-
-💡 완성된 코드는 `rag_chatbot.py`와 `rag_workshop.py`를 참고하세요.
 """)
 
 st.divider()
@@ -635,14 +625,60 @@ else:
             st.write(news.content[:150] + "...")
             st.divider()
 
-    # 대화 기록 표시
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"], avatar=msg.get("avatar")):
-            st.markdown(msg["content"])
-            if msg.get("sources"):
-                with st.expander("📚 참조 뉴스"):
-                    for title, publisher, date in msg["sources"]:
-                        st.markdown(f"**{title}** ({publisher}, {date})")
+    # 대화 기록 표시 (스크롤 가능한 컨테이너)
+    chat_container = st.container(height=500)
+    with chat_container:
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"], avatar=msg.get("avatar")):
+                st.markdown(msg["content"])
+                if msg.get("sources"):
+                    with st.expander("📚 참조 뉴스"):
+                        for title, publisher, date in msg["sources"]:
+                            st.markdown(f"**{title}** ({publisher}, {date})")
+
+        # 응답 생성 중인 경우 (컨테이너 안에서 처리)
+        if st.session_state.pending_response:
+            last_user_input = st.session_state.messages[-1]["content"]
+            with st.chat_message("assistant", avatar=AVATAR_BOT):
+                with st.spinner("답변 생성 중..."):
+                    try:
+                        result = generate_rag_answer(
+                            last_user_input,
+                            st.session_state.news_data,
+                            st.session_state.llm
+                        )
+                        response = result["answer"]
+                        sources = result["sources"]
+
+                    except Exception as e:
+                        response = f"⚠️ 오류: {str(e)}"
+                        sources = []
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": response,
+                "avatar": AVATAR_BOT,
+                "sources": sources
+            })
+            st.session_state.pending_response = False
+            st.rerun()
+
+    # 자동 스크롤 (새 메시지 입력 시)
+    if st.session_state.messages:
+        st.components.v1.html(
+            """
+            <script>
+                const chatContainers = window.parent.document.querySelectorAll('[data-testid="stVerticalBlockBorderWrapper"]');
+                chatContainers.forEach(container => {
+                    const scrollable = container.querySelector('[data-testid="stVerticalBlock"]');
+                    if (scrollable && scrollable.scrollHeight > scrollable.clientHeight) {
+                        scrollable.scrollTop = scrollable.scrollHeight;
+                    }
+                });
+            </script>
+            """,
+            height=0
+        )
 
     # 사용자 입력
     if user_input := st.chat_input("심리 관련 뉴스에 대해 질문하세요"):
@@ -651,37 +687,5 @@ else:
             "content": user_input,
             "avatar": AVATAR_USER
         })
-        with st.chat_message("user", avatar=AVATAR_USER):
-            st.markdown(user_input)
-
-        with st.chat_message("assistant", avatar=AVATAR_BOT):
-            with st.spinner("답변 생성 중..."):
-                try:
-                    result = generate_rag_answer(
-                        user_input,
-                        st.session_state.news_data,
-                        st.session_state.llm
-                    )
-                    response = result["answer"]
-                    sources = result["sources"]
-
-                    st.markdown(response)
-
-                    if sources:
-                        with st.expander("📚 참조 뉴스"):
-                            for title, publisher, date in sources:
-                                st.markdown(f"**{title}** ({publisher}, {date})")
-
-                except Exception as e:
-                    response = f"⚠️ 오류: {str(e)}"
-                    sources = []
-                    st.error(response)
-
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": response,
-            "avatar": AVATAR_BOT,
-            "sources": sources
-        })
-
+        st.session_state.pending_response = True
         st.rerun()
