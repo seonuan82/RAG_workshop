@@ -1,22 +1,19 @@
 """
 간단한 Streamlit 챗봇
 =====================
-실행: streamlit run chatbot_app.py
+실행: streamlit run W2_Streamlit_chatbot.py
 """
 
 import streamlit as st
-from W2_Streamlit_chatbot_utilities import get_basic_response, get_revised_response
+from W2_Streamlit_chatbot_utilities import get_basic_response
 
 # === 설정 ===
 AVATAR_USER = "🎃"
-AVATAR_DEFAULT = "🤖"
-AVATAR_REVISED = "🦾"
+AVATAR_BOT = "🤖"
 
 # === 세션 상태 초기화 ===
 if "messages" not in st.session_state:
     st.session_state.messages = []
-if "version" not in st.session_state:
-    st.session_state.version = "Default"
 
 
 def reset_chat():
@@ -28,9 +25,7 @@ def reset_chat():
 st.title("💬 Chatbot")
 
 # 상단 버튼
-_, col_version, col_button = st.columns([2, 1, 1])
-with col_version:
-    st.markdown(f"**{st.session_state.version}**")
+_, col_button = st.columns([3, 1])
 with col_button:
     st.button("새 대화", on_click=reset_chat, use_container_width=True)
 
@@ -52,30 +47,18 @@ if user_input := st.chat_input("질문을 입력하세요"):
 
     # 응답 생성
     try:
-        if user_input == "password":
-            st.session_state.version = "Revised"
-            response = "🔓 새로운 버전으로 전환합니다.\n\n" + get_revised_response(user_input)
-        elif user_input == "return":
-            st.session_state.version = "Default"
-            response = "🔙 기본 버전으로 돌아갑니다.\n\n" + get_basic_response(user_input)
-        elif st.session_state.version == "Revised":
-            response = get_revised_response(user_input)
-        else:
-            response = get_basic_response(user_input)
+        response = get_basic_response(user_input)
     except Exception as e:
         response = f"⚠️ 오류가 발생했습니다: {str(e)}"
 
-    # 어시스턴트 아바타 선택
-    avatar = AVATAR_REVISED if st.session_state.version == "Revised" else AVATAR_DEFAULT
-
     # 어시스턴트 메시지 저장 및 표시
-    with st.chat_message("assistant", avatar=avatar):
+    with st.chat_message("assistant", avatar=AVATAR_BOT):
         st.markdown(response)
 
     st.session_state.messages.append({
         "role": "assistant",
         "content": response,
-        "avatar": avatar
+        "avatar": AVATAR_BOT
     })
 
     st.rerun()
