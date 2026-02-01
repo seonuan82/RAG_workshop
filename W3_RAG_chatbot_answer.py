@@ -550,14 +550,33 @@ else:
             st.write(news.content)
             st.divider()
 
-    # 대화 기록 표시
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"], avatar=msg.get("avatar")):
-            st.markdown(msg["content"])
-            if msg.get("sources"):
-                with st.expander("📚 참조 뉴스"):
-                    for title, publisher, date in msg["sources"]:
-                        st.markdown(f"**{title}** ({publisher}, {date})")
+    # 대화 기록 표시 (스크롤 가능한 컨테이너)
+    chat_container = st.container(height=500)
+    with chat_container:
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"], avatar=msg.get("avatar")):
+                st.markdown(msg["content"])
+                if msg.get("sources"):
+                    with st.expander("📚 참조 뉴스"):
+                        for title, publisher, date in msg["sources"]:
+                            st.markdown(f"**{title}** ({publisher}, {date})")
+
+    # 자동 스크롤 (새 메시지 입력 시)
+    if st.session_state.messages:
+        st.components.v1.html(
+            """
+            <script>
+                const chatContainers = window.parent.document.querySelectorAll('[data-testid="stVerticalBlockBorderWrapper"]');
+                chatContainers.forEach(container => {
+                    const scrollable = container.querySelector('[data-testid="stVerticalBlock"]');
+                    if (scrollable && scrollable.scrollHeight > scrollable.clientHeight) {
+                        scrollable.scrollTop = scrollable.scrollHeight;
+                    }
+                });
+            </script>
+            """,
+            height=0
+        )
 
     # 사용자 입력
     if user_input := st.chat_input("심리 관련 뉴스에 대해 질문하세요"):
