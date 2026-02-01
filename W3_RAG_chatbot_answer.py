@@ -563,36 +563,36 @@ else:
                         for title, publisher, date in msg["sources"]:
                             st.markdown(f"**{title}** ({publisher}, {date})")
 
-    # 응답 생성 중인 경우 (컨테이너 안에서 처리)
-    if st.session_state.pending_response:
-        last_user_input = st.session_state.messages[-1]["content"]
-        with st.chat_message("assistant", avatar=AVATAR_BOT):
-            with st.spinner("답변 생성 중..."):
-                try:
-                    use_semantic = (search_method == "Semantic (임베딩)" and st.session_state.embeddings_ready)
+        # 응답 생성 중인 경우 (컨테이너 안에서 처리)
+        if st.session_state.pending_response:
+            last_user_input = st.session_state.messages[-1]["content"]
+            with st.chat_message("assistant", avatar=AVATAR_BOT):
+                with st.spinner("답변 생성 중..."):
+                    try:
+                        use_semantic = (search_method == "Semantic (임베딩)" and st.session_state.embeddings_ready)
 
-                    result = generate_rag_answer(
-                        last_user_input,
-                        st.session_state.news_data,
-                        st.session_state.llm,
-                        use_semantic=use_semantic,
-                        top_k=TOP_K_RESULTS
-                    )
-                    response = result["answer"]
-                    sources = result["sources"]
+                        result = generate_rag_answer(
+                            last_user_input,
+                            st.session_state.news_data,
+                            st.session_state.llm,
+                            use_semantic=use_semantic,
+                            top_k=TOP_K_RESULTS
+                        )
+                        response = result["answer"]
+                        sources = result["sources"]
 
-                except Exception as e:
-                    response = f"⚠️ 오류: {str(e)}"
-                    sources = []
+                    except Exception as e:
+                        response = f"⚠️ 오류: {str(e)}"
+                        sources = []
 
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": response,
-            "avatar": AVATAR_BOT,
-            "sources": sources
-        })
-        st.session_state.pending_response = False
-        st.rerun()
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": response,
+                "avatar": AVATAR_BOT,
+                "sources": sources
+            })
+            st.session_state.pending_response = False
+            st.rerun()
 
     # 자동 스크롤 (새 메시지 입력 시)
     if st.session_state.messages:
@@ -620,3 +620,4 @@ else:
         })
         st.session_state.pending_response = True
         st.rerun()
+
