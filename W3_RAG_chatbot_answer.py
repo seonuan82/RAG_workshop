@@ -55,33 +55,32 @@ def get_data_path():
 def load_news_from_github(max_items: int = 100) -> list:
     """GitHub에서 뉴스 CSV 데이터를 다운로드하여 로드합니다."""
     import urllib.request
-    import tempfile
     import io
 
-    st.info("📥 GitHub에서 뉴스 데이터 다운로드 중...")
+    st.info(f"📥 GitHub에서 뉴스 데이터 다운로드 중...")
 
     try:
         # URL에서 직접 읽기
         with urllib.request.urlopen(GITHUB_CSV_URL) as response:
             content = response.read()
 
-        # 여러 인코딩 시도
-        for encoding in ['utf-8', 'utf-8-sig', 'cp949', 'euc-kr']:
-            try:
-                decoded = content.decode(encoding)
-                df = pd.read_csv(io.StringIO(decoded))
-                st.success(f"✅ GitHub에서 데이터 로드 완료 (encoding: {encoding})")
-                break
-            except (UnicodeDecodeError, LookupError):
-                continue
-        else:
-            decoded = content.decode('utf-8', errors='ignore')
-            df = pd.read_csv(io.StringIO(decoded))
+        st.info(f"📦 다운로드 완료: {len(content):,} bytes")
+
+        # cp949 인코딩으로 디코딩 (일부 잘못된 바이트는 대체)
+        # 한국 뉴스 데이터는 cp949 인코딩
+        decoded = content.decode('cp949', errors='replace')
+        df = pd.read_csv(io.StringIO(decoded))
+
+        st.success(f"✅ 데이터 로드 성공")
+        st.info(f"📊 컬럼: {list(df.columns)[:6]}...")
+        st.info(f"📊 총 {len(df)}개 행")
 
         return _parse_news_dataframe(df, max_items)
 
     except Exception as e:
         st.error(f"❌ GitHub 다운로드 실패: {e}")
+        import traceback
+        st.error(traceback.format_exc())
         return []
 
 
@@ -156,7 +155,7 @@ def _parse_news_dataframe(df: pd.DataFrame, max_items: int = 100) -> list:
         for col in candidates:
             if col in df.columns:
                 return col
-        return candidates[0]  # 기본값
+        return None  # 찾지 못함
 
     id_col = find_column(col_mapping['news_id'])
     date_col = find_column(col_mapping['date'])
@@ -165,60 +164,47 @@ def _parse_news_dataframe(df: pd.DataFrame, max_items: int = 100) -> list:
     content_col = find_column(col_mapping['content'])
     url_col = find_column(col_mapping['url'])
 
+    # 컬럼 매핑 결과 표시
+    st.info(f"🔍 컬럼 매핑: news_id={id_col}, date={date_col}, publisher={publisher_col}, title={title_col}, content={content_col}, url={url_col}")
+
+    # 필수 컬럼 확인
+    if not title_col or not content_col:
+        st.error(f"❌ 필수 컬럼을 찾을 수 없습니다. 제목={title_col}, 본문={content_col}")
+        st.error(f"📋 사용 가능한 컬럼: {list(df.columns)}")
+        return []
+
     # 각 행을 NewsItem으로 변환
     for _, row in df.iterrows():
         try:
             news = NewsItem(
-                news_id=str(row.get(id_col, '')),
-                date=str(row.get(date_col, '')),
-                publisher=str(row.get(publisher_col, '')),
+                news_id=str(row.get(id_col, '')) if id_col else '',
+                date=str(row.get(date_col, '')) if date_col else '',
+                publisher=str(row.get(publisher_col, '')) if publisher_col else '',
                 title=str(row.get(title_col, '')),
-                content=str(row.get(content_col, '')),  # 본문 전체 저장
-                url=str(row.get(url_col, ''))
+                content=str(row.get(content_col, '')),
+                url=str(row.get(url_col, '')) if url_col else ''
             )
             news_list.append(news)
-        except Exception:
+        except Exception as e:
             continue
 
+    st.success(f"✅ {len(news_list)}개 뉴스 파싱 완료")
     return news_list
 
 
 def load_news_data(filepath: Optional[str] = None, max_items: int = 100) -> list:
     """
-    CSV 파일에서 뉴스 데이터를 로드합니다.
+    GitHub에서 뉴스 데이터를 로드합니다.
 
     Args:
-        filepath: CSV 파일 경로 (None이면 기본 경로 또는 GitHub에서 다운로드)
+        filepath: 사용하지 않음 (호환성 유지용)
         max_items: 로드할 최대 뉴스 수
 
     Returns:
         NewsItem 리스트
     """
-    # 기본 경로 설정
-    if filepath is None:
-        filepath = DATA_PATH
-
-    # 로컬 파일이 없으면 GitHub에서 다운로드
-    if filepath is None or not os.path.exists(filepath):
-        return load_news_from_github(max_items)
-
-    # 로컬 파일 로드
-    st.info(f"📂 로컬 파일에서 로드: {filepath}")
-
-    # CSV 파일 읽기 (여러 인코딩 시도)
-    for encoding in ['utf-8', 'utf-8-sig', 'cp949', 'euc-kr']:
-        try:
-            df = pd.read_csv(filepath, encoding=encoding)
-            st.success(f"✅ 파일 로드 완료 (encoding: {encoding})")
-            break
-        except (UnicodeDecodeError, LookupError):
-            continue
-    else:
-        # 마지막 수단: 오류 무시
-        df = pd.read_csv(filepath, encoding='utf-8', encoding_errors='ignore')
-        st.warning("⚠️ 파일 로드 완료 (일부 문자 손실 가능)")
-
-    return _parse_news_dataframe(df, max_items)
+    # GitHub에서 다운로드
+    return load_news_from_github(max_items)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -577,36 +563,36 @@ else:
                         for title, publisher, date in msg["sources"]:
                             st.markdown(f"**{title}** ({publisher}, {date})")
 
-        # 응답 생성 중인 경우 (컨테이너 안에서 처리)
-        if st.session_state.pending_response:
-            last_user_input = st.session_state.messages[-1]["content"]
-            with st.chat_message("assistant", avatar=AVATAR_BOT):
-                with st.spinner("답변 생성 중..."):
-                    try:
-                        use_semantic = (search_method == "Semantic (임베딩)" and st.session_state.embeddings_ready)
+    # 응답 생성 중인 경우 (컨테이너 안에서 처리)
+    if st.session_state.pending_response:
+        last_user_input = st.session_state.messages[-1]["content"]
+        with st.chat_message("assistant", avatar=AVATAR_BOT):
+            with st.spinner("답변 생성 중..."):
+                try:
+                    use_semantic = (search_method == "Semantic (임베딩)" and st.session_state.embeddings_ready)
 
-                        result = generate_rag_answer(
-                            last_user_input,
-                            st.session_state.news_data,
-                            st.session_state.llm,
-                            use_semantic=use_semantic,
-                            top_k=TOP_K_RESULTS
-                        )
-                        response = result["answer"]
-                        sources = result["sources"]
+                    result = generate_rag_answer(
+                        last_user_input,
+                        st.session_state.news_data,
+                        st.session_state.llm,
+                        use_semantic=use_semantic,
+                        top_k=TOP_K_RESULTS
+                    )
+                    response = result["answer"]
+                    sources = result["sources"]
 
-                    except Exception as e:
-                        response = f"⚠️ 오류: {str(e)}"
-                        sources = []
+                except Exception as e:
+                    response = f"⚠️ 오류: {str(e)}"
+                    sources = []
 
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": response,
-                "avatar": AVATAR_BOT,
-                "sources": sources
-            })
-            st.session_state.pending_response = False
-            st.rerun()
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": response,
+            "avatar": AVATAR_BOT,
+            "sources": sources
+        })
+        st.session_state.pending_response = False
+        st.rerun()
 
     # 자동 스크롤 (새 메시지 입력 시)
     if st.session_state.messages:
