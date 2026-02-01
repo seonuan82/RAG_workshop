@@ -395,7 +395,7 @@ def get_secret(key: str):
 
 
 class GeminiLLM:
-    def __init__(self, model: str = "gemini-2.0-flash"):
+    def __init__(self, model: str = "gemini-2.5-flash"):
         from google import genai
         api_key = get_secret("GOOGLE_API_KEY")
         if not api_key:
@@ -414,7 +414,7 @@ class GeminiLLM:
 
 
 class OpenAILLM:
-    def __init__(self, model: str = "gpt-4o-mini", embedding_model: str = "text-embedding-3-small"):
+    def __init__(self, model: str = "gpt-5-mini", embedding_model: str = "text-embedding-3-small"):
         from openai import OpenAI
         api_key = get_secret("OPENAI_API_KEY")
         if not api_key:
@@ -620,4 +620,3 @@ else:
         })
         st.session_state.pending_response = True
         st.rerun()
-
