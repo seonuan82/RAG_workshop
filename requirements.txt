@@ -1,4 +1,4 @@
-# RAG Workshop Dependencies
+# Streamlit App Requirements
 
 # Core
 numpy>=1.24.0
@@ -6,6 +6,6 @@ pandas>=2.0.0
 python-dotenv>=1.0.0
 streamlit>=1.30.0
 
-# LLM APIs (둘 중 하나만 설치해도 됨)
+# LLM APIs 
 google-genai>=1.0.0          # Gemini (new SDK)
 openai>=1.0.0                # OpenAI GPT
