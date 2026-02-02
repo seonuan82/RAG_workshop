@@ -85,4 +85,5 @@ OPENAI_API_KEY = "your-api-key"
 
 ---
 *링크를 걸어둔 Streamlit app은 2월 5일까지만 접속 가능합니다.
+
 *Last updated: 2026-02-03 by Seonu An*
