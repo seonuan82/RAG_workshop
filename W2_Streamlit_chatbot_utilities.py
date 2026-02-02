@@ -23,7 +23,7 @@ def get_secret(key: str) -> Optional[str]:
 
 
 # === 프롬프트 설정 ===
-BASIC_PROMPT = "You are a kind assistant. Please respond in Korean."
+BASIC_PROMPT = "You are a kind assistant. Please respond in Korean." # 원하는 프롬프트로 수정 가능!
 
 
 # === LLM 추상 클래스 ===
@@ -165,6 +165,5 @@ def reset_llm():
 
 # === 응답 생성 함수 ===
 def get_basic_response(user_input: str) -> str:
-    """기본 페르소나로 응답 생성"""
     llm = get_llm()
     return llm.generate(BASIC_PROMPT, user_input)
