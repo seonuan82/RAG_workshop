@@ -19,7 +19,7 @@
 
 | 순서 | 내용 | 실습 파일 | Colab |
 |------|------|----------|-------|
-| **1** | RAG 기본 개념 및 구현 | [발표 슬라이드 링크](https://www.canva.com/design/DAG_kVIUpn0/WsItAe2XgXWxYOL70i9WEw/view?utm_content=DAG_kVIUpn0&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=hf5d16a1ffb) | [![Google Colab](https://colab.research.google.com/drive/1YYwC7SEqd0FaRr0qdUe4upY-D6OvTvq6?usp=sharing)](https://colab.research.google.com/drive/1YYwC7SEqd0FaRr0qdUe4upY-D6OvTvq6?usp=sharing) |
+| **1** | RAG 기본 개념 및 구현 | [발표 슬라이드 링크](https://www.canva.com/design/DAG_kVIUpn0/WsItAe2XgXWxYOL70i9WEw/view?utm_content=DAG_kVIUpn0&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=hf5d16a1ffb) | [Google Colab](https://colab.research.google.com/drive/1YYwC7SEqd0FaRr0qdUe4upY-D6OvTvq6?usp=sharing) |
 | **2** | Streamlit 기본 챗봇 만들기 | `W2_Streamlit_chatbot.py` |  |
 | **3** | RAG 챗봇 (BM25 & Semantic Search) | `W3_RAG_chatbot_practice.py` |  |
 | **선택** | RAG 챗봇 심화 (Hybrid Search) | `W4_RAG_chatbot_advanced.py` |  |
@@ -31,13 +31,13 @@
 
 ```
 RAG_Workshop/
-├── W2_Streamlit_chatbot.py           # W2: 기본 Streamlit 챗봇
-├── W2_Streamlit_chatbot_utilities.py # W2: LLM 유틸리티 모듈
-├── W3_RAG_chatbot_practice.py        # W3: RAG 챗봇 실습 (빈칸)
-├── W3_RAG_chatbot_answer.py          # W3: RAG 챗봇 정답
-├── W4_RAG_chatbot_advanced.py        # W4: Advanced RAG 챗봇
-├── Colab_data_OECD.txt               # W1 실습용 데이터
-├── Practice_data_NewsResult.CSV      # W3 실습용 뉴스 데이터
+├── W2_Streamlit_chatbot.py           # 2: 기본 Streamlit 챗봇
+├── W2_Streamlit_chatbot_utilities.py # 2: LLM 유틸리티 모듈
+├── W3_RAG_chatbot_practice.py        # 3: RAG 챗봇 실습 (빈칸)
+├── W3_RAG_chatbot_answer.py          # 3: RAG 챗봇 정답
+├── W4_RAG_chatbot_advanced.py        # 4: Advanced RAG 챗봇
+├── Colab_data_OECD.txt               # 1 실습용 데이터
+├── Practice_data_NewsResult.CSV      # 3 실습용 뉴스 데이터
 ├── Streamlit Guide.pdf               # Streamlit 배포 가이드
 └── requirements.txt                  # 패키지 의존성 (필수)
 ```
@@ -84,5 +84,5 @@ OPENAI_API_KEY = "your-api-key"
 ```
 
 ---
-
+*링크를 걸어둔 Streamlit app은 2월 5일까지만 접속 가능합니다.
 *Last updated: 2026-02-03 by Seonu An*
