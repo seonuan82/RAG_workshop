@@ -1,7 +1,6 @@
 """
-RAG 챗봇 실습 파일 - 심리 뉴스 검색
+RAG 챗봇 실습 파일 - 심리/뇌과학 뉴스 검색
 ====================================
-실행: streamlit run rag_chatbot_practice.py
 
 📝 실습 목표:
 1. get_relevant_news() 함수 구현
@@ -9,12 +8,12 @@ RAG 챗봇 실습 파일 - 심리 뉴스 검색
 3. semantic_search() 함수 구현
 4. generate_rag_answer() 적용하여 RAG 생성 챗봇 구현
 
-💡 데이터: Practice_data_NewsResult.CSV (심리 키워드 뉴스 1개월치)
+💡 데이터: Practice_data_NewsResult.CSV (심리 키워드 뉴스 1개월치 + 뇌과학 키워드 뉴스 3개월치)
 
 🔍 예시 질문:
 - "정신건강 관련 최신 뉴스는?"
-- "심리상담 트렌드는?"
-- "우울증 치료 관련 뉴스"
+- "경제심리 관련 뉴스는?"
+- "공직자 대상 정신건강"
 - "청소년 심리 문제"
 - "직장인 스트레스 관련 기사"
 """
@@ -251,10 +250,6 @@ def format_news_data(news_results: list) -> str:
     return "\n\n---\n\n".join(formatted_list)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# 실습 1: BM25 검색 함수 구현
-# ═══════════════════════════════════════════════════════════════════════════
-
 def tokenize(text: str) -> list:
     """간단한 토크나이저"""
     text = text.lower()
@@ -285,6 +280,9 @@ def bm25_score(query_tokens: list, doc_tokens: list,
 
     return score
 
+# ═══════════════════════════════════════════════════════════════════════════
+# 실습 1: BM25 검색 함수 구현
+# ═══════════════════════════════════════════════════════════════════════════
 
 def bm25_search(query: str, news_data: list, top_k: int = 5) -> list:
     """
@@ -335,16 +333,16 @@ def bm25_search(query: str, news_data: list, top_k: int = 5) -> list:
     return []
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# 실습 2: Semantic Search 함수 구현
-# ═══════════════════════════════════════════════════════════════════════════
-
 def cosine_similarity(a: list, b: list) -> float:
     """코사인 유사도 계산 (이 함수는 제공됨)"""
     a = np.array(a)
     b = np.array(b)
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 실습 2: Semantic Search 함수 구현
+# ═══════════════════════════════════════════════════════════════════════════
 
 def semantic_search(query: str, news_data: list, llm, top_k: int = 5) -> list:
     """
@@ -535,7 +533,7 @@ def create_llm():
 
 # === 사이드바 ===
 with st.sidebar:
-    st.header("📰 심리 뉴스 RAG 실습")
+    st.header("📰 뉴스데이터 활용 RAG 실습")
 
     st.markdown("""
     ### 실습 순서
@@ -594,10 +592,10 @@ with st.sidebar:
 
 
 # === 메인 영역 (앱 UI) ===
-st.title("📰 RAG 챗봇 실습 - 심리 뉴스")
+st.title("📰 RAG 챗봇 실습 - 뉴스데이터")
 
 st.markdown("""
-### 실습: **심리 관련 뉴스 데이터**를 사용하여 RAG 시스템을 구현하는 챗봇 만들어 보기.
+### 실습:  **심리/뇌과학 관련 뉴스 데이터**를 사용하여 RAG 시스템을 구현하는 챗봇 만들어 보기.
 
 #### 📋 구현해야 할 함수들:
 1. `get_relevant_news()` - 관련 뉴스 검색
@@ -609,11 +607,10 @@ st.markdown("""
 
 #### 🔍 챗봇에게 물어볼 수 있는 질문 예시:
 - "정신건강 관련 최신 뉴스는?"
-- "심리상담 트렌드는?"
-- "우울증 치료 관련 뉴스"
+- "경제심리 관련 뉴스는?"
+- "공직자 대상 정신건강"
 - "청소년 심리 문제"
 - "직장인 스트레스 관련 기사"
-- "심리치료사 관련 정책"
 """)
 
 st.divider()
@@ -705,7 +702,7 @@ else:
         )
 
     # 사용자 입력
-    if user_input := st.chat_input("심리 관련 뉴스에 대해 질문하세요"):
+    if user_input := st.chat_input("질문하세요"):
         st.session_state.messages.append({
             "role": "user",
             "content": user_input,
