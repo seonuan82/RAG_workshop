@@ -317,9 +317,9 @@ def bm25_search(query: str, news_data: list, top_k: int = 5) -> list:
     
     # 3. 문서 빈도 계산 (IDF용)
     doc_freqs = Counter()
-        for tokens in news_tokens_list:
-            for token in set(tokens):
-                doc_freqs[token] += 1
+    for tokens in news_tokens_list:
+        for token in set(tokens):
+            doc_freqs[token] += 1
     
     # 4. 평균 문서 길이 계산
     avg_doc_len = sum(len(t) for t in news_tokens_list) / len(news_data)
