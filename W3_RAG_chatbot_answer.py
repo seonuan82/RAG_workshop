@@ -1,9 +1,10 @@
 """
-RAG 챗봇 - 심리 뉴스 검색 (정답 버전)
-======================================
-실행: streamlit run rag_chatbot.py
+RAG 챗봇 - 심리 뉴스 검색 (Hybrid Search 포함 정답 버전)
+========================================================
+실행: streamlit run w4_answer.py
 
 심리 관련 뉴스 데이터를 기반으로 질문에 답변하는 RAG 챗봇
+BM25, Semantic, Hybrid 검색 방식 지원
 """
 
 import streamlit as st
@@ -19,7 +20,7 @@ from typing import Optional
 
 # === 페이지 설정 ===
 st.set_page_config(
-    page_title="RAG 챗봇 - 심리 뉴스",
+    page_title="RAG 챗봇 - Hybrid Search",
     page_icon="📰",
     layout="wide"
 )
@@ -28,13 +29,11 @@ st.set_page_config(
 AVATAR_USER = "👤"
 AVATAR_BOT = "🤖"
 CSV_FILENAME = "Practice_data_NewsResult.CSV"
-# GitHub Raw URL (저장소에 CSV 파일 업로드 후 이 URL 수정 필요)
 GITHUB_CSV_URL = "https://raw.githubusercontent.com/seonuan82/RAG_Workshop/main/Practice_data_NewsResult.CSV"
 
 
 def get_data_path():
     """데이터 파일 경로를 반환합니다. (로컬 > 현재 디렉토리 > None)"""
-    # 현재 파일 기준 경로
     try:
         current_dir = Path(__file__).parent
         local_path = current_dir / CSV_FILENAME
@@ -43,12 +42,10 @@ def get_data_path():
     except:
         pass
 
-    # Streamlit Cloud에서는 현재 작업 디렉토리 기준
     cloud_path = Path(CSV_FILENAME)
     if cloud_path.exists():
         return str(cloud_path)
 
-    # 파일이 없으면 None 반환 (GitHub에서 다운로드 필요)
     return None
 
 
@@ -60,27 +57,21 @@ def load_news_from_github(max_items: int = 100) -> list:
     st.info(f"📥 GitHub에서 뉴스 데이터 다운로드 중...")
 
     try:
-        # URL에서 직접 읽기
         with urllib.request.urlopen(GITHUB_CSV_URL) as response:
             content = response.read()
 
         st.info(f"📦 다운로드 완료: {len(content):,} bytes")
 
-        # cp949 인코딩으로 디코딩 (일부 잘못된 바이트는 대체)
-        # 한국 뉴스 데이터는 cp949 인코딩
         decoded = content.decode('cp949', errors='replace')
         df = pd.read_csv(io.StringIO(decoded))
 
         st.success(f"✅ 데이터 로드 성공")
-        st.info(f"📊 컬럼: {list(df.columns)[:6]}...")
         st.info(f"📊 총 {len(df)}개 행")
 
         return _parse_news_dataframe(df, max_items)
 
     except Exception as e:
         st.error(f"❌ GitHub 다운로드 실패: {e}")
-        import traceback
-        st.error(traceback.format_exc())
         return []
 
 
@@ -112,6 +103,10 @@ def init_session():
         st.session_state.embeddings_ready = False
     if "pending_response" not in st.session_state:
         st.session_state.pending_response = False
+    if "search_method" not in st.session_state:
+        st.session_state.search_method = "BM25"
+    if "hybrid_alpha" not in st.session_state:
+        st.session_state.hybrid_alpha = 0.5
 
 
 init_session()
@@ -137,11 +132,8 @@ def reset_all():
 def _parse_news_dataframe(df: pd.DataFrame, max_items: int = 100) -> list:
     """DataFrame을 NewsItem 리스트로 변환합니다."""
     news_list = []
-
-    # 최대 max_items개만 사용
     df = df.head(max_items)
 
-    # 컬럼명 확인 및 매핑 (다양한 CSV 포맷 지원)
     col_mapping = {
         'news_id': ['뉴스 식별자', '기사 고유번호', 'news_id', 'id'],
         'date': ['일자', 'date', '날짜'],
@@ -155,7 +147,7 @@ def _parse_news_dataframe(df: pd.DataFrame, max_items: int = 100) -> list:
         for col in candidates:
             if col in df.columns:
                 return col
-        return None  # 찾지 못함
+        return None
 
     id_col = find_column(col_mapping['news_id'])
     date_col = find_column(col_mapping['date'])
@@ -164,16 +156,10 @@ def _parse_news_dataframe(df: pd.DataFrame, max_items: int = 100) -> list:
     content_col = find_column(col_mapping['content'])
     url_col = find_column(col_mapping['url'])
 
-    # 컬럼 매핑 결과 표시
-    st.info(f"🔍 컬럼 매핑: news_id={id_col}, date={date_col}, publisher={publisher_col}, title={title_col}, content={content_col}, url={url_col}")
-
-    # 필수 컬럼 확인
     if not title_col or not content_col:
-        st.error(f"❌ 필수 컬럼을 찾을 수 없습니다. 제목={title_col}, 본문={content_col}")
-        st.error(f"📋 사용 가능한 컬럼: {list(df.columns)}")
+        st.error(f"❌ 필수 컬럼을 찾을 수 없습니다.")
         return []
 
-    # 각 행을 NewsItem으로 변환
     for _, row in df.iterrows():
         try:
             news = NewsItem(
@@ -185,7 +171,7 @@ def _parse_news_dataframe(df: pd.DataFrame, max_items: int = 100) -> list:
                 url=str(row.get(url_col, '')) if url_col else ''
             )
             news_list.append(news)
-        except Exception as e:
+        except Exception:
             continue
 
     st.success(f"✅ {len(news_list)}개 뉴스 파싱 완료")
@@ -193,29 +179,8 @@ def _parse_news_dataframe(df: pd.DataFrame, max_items: int = 100) -> list:
 
 
 def load_news_data(filepath: Optional[str] = None, max_items: int = 100) -> list:
-    """
-    GitHub에서 뉴스 데이터를 로드합니다.
-
-    Args:
-        filepath: 사용하지 않음 (호환성 유지용)
-        max_items: 로드할 최대 뉴스 수
-
-    Returns:
-        NewsItem 리스트
-    """
-    # GitHub에서 다운로드
+    """GitHub에서 뉴스 데이터를 로드합니다."""
     return load_news_from_github(max_items)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 관련 뉴스 가져오기
-# ═══════════════════════════════════════════════════════════════════════════
-
-def get_relevant_news(query: str, news_data: list, top_k: int = 5) -> list:
-    """쿼리와 관련된 뉴스를 검색합니다."""
-    # BM25 검색 사용
-    results = bm25_search(query, news_data, top_k)
-    return results
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -273,7 +238,6 @@ def bm25_search(query: str, news_data: list, top_k: int = 5, k1: float = None, b
     if not news_data:
         return []
 
-    # BM25 파라미터 (전역 상수 사용)
     if k1 is None:
         k1 = BM25_K1 if 'BM25_K1' in globals() else 1.5
     if b is None:
@@ -337,22 +301,136 @@ def semantic_search(query: str, news_data: list, llm, top_k: int = 5) -> list:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Hybrid Search (NEW!)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def normalize_scores(results: list) -> list:
+    """
+    점수를 0~1 범위로 정규화합니다. (Min-Max Normalization)
+
+    Args:
+        results: [(NewsItem, score), ...] 리스트
+
+    Returns:
+        [(NewsItem, normalized_score), ...] 리스트
+    """
+    if not results:
+        return []
+
+    scores = [score for _, score in results]
+    min_score = min(scores)
+    max_score = max(scores)
+
+    # 모든 점수가 같으면 1로 설정
+    if max_score == min_score:
+        return [(news, 1.0) for news, _ in results]
+
+    normalized = []
+    for news, score in results:
+        norm_score = (score - min_score) / (max_score - min_score)
+        normalized.append((news, norm_score))
+
+    return normalized
+
+
+def hybrid_search(query: str, news_data: list, llm, top_k: int = 5, alpha: float = 0.5) -> list:
+    """
+    BM25와 Semantic Search를 결합한 하이브리드 검색을 수행합니다.
+
+    Args:
+        query: 검색 쿼리
+        news_data: NewsItem 리스트
+        llm: LLM 인스턴스
+        top_k: 반환할 결과 수
+        alpha: BM25 가중치 (0~1). 1에 가까울수록 BM25 중심, 0에 가까울수록 Semantic 중심
+
+    Returns:
+        [(NewsItem, score), ...] 리스트
+
+    📊 Alpha 값에 따른 특성:
+    - alpha = 1.0: BM25만 사용 (키워드 매칭 중심)
+    - alpha = 0.5: 균형 있는 하이브리드
+    - alpha = 0.0: Semantic만 사용 (의미 유사도 중심)
+    """
+    if not news_data:
+        return []
+
+    # 1. BM25 검색 수행 (전체 문서에 대해)
+    bm25_results = bm25_search(query, news_data, top_k=len(news_data))
+    bm25_normalized = normalize_scores(bm25_results)
+
+    # 2. Semantic 검색 수행 (전체 문서에 대해)
+    semantic_results = semantic_search(query, news_data, llm, top_k=len(news_data))
+    semantic_normalized = normalize_scores(semantic_results)
+
+    # 3. 점수 딕셔너리 생성
+    bm25_scores = {news.news_id: score for news, score in bm25_normalized}
+    semantic_scores = {news.news_id: score for news, score in semantic_normalized}
+
+    # 4. 하이브리드 점수 계산
+    hybrid_results = []
+    for news in news_data:
+        bm25_s = bm25_scores.get(news.news_id, 0)
+        sem_s = semantic_scores.get(news.news_id, 0)
+        final_score = alpha * bm25_s + (1 - alpha) * sem_s
+        hybrid_results.append((news, final_score))
+
+    # 5. 점수순 정렬 및 상위 top_k개 반환
+    hybrid_results.sort(key=lambda x: x[1], reverse=True)
+    return hybrid_results[:top_k]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 관련 뉴스 가져오기 (검색 방식 통합)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def get_relevant_news(query: str, news_data: list, llm=None, top_k: int = 5,
+                      search_method: str = "BM25", alpha: float = 0.5) -> list:
+    """
+    쿼리와 관련된 뉴스를 검색합니다.
+
+    Args:
+        query: 검색 쿼리
+        news_data: NewsItem 리스트
+        llm: LLM 인스턴스 (Semantic/Hybrid 검색 시 필요)
+        top_k: 반환할 뉴스 수
+        search_method: 검색 방식 ("BM25", "Semantic", "Hybrid")
+        alpha: Hybrid 검색 시 BM25 가중치
+
+    Returns:
+        관련 뉴스 리스트 [(NewsItem, score), ...]
+    """
+    if search_method == "BM25":
+        return bm25_search(query, news_data, top_k)
+    elif search_method == "Semantic":
+        return semantic_search(query, news_data, llm, top_k)
+    elif search_method == "Hybrid":
+        return hybrid_search(query, news_data, llm, top_k, alpha)
+    else:
+        return bm25_search(query, news_data, top_k)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # RAG 파이프라인
 # ═══════════════════════════════════════════════════════════════════════════
 
-def generate_rag_answer(query: str, news_data: list, llm, use_semantic: bool = False, top_k: int = 3) -> dict:
+def generate_rag_answer(query: str, news_data: list, llm,
+                        search_method: str = "BM25", alpha: float = 0.5, top_k: int = 3) -> dict:
     """RAG 파이프라인: 검색 + 생성"""
 
     # 1. 관련 뉴스 검색
-    if use_semantic:
-        relevant_news = semantic_search(query, news_data, llm, top_k=top_k)
-    else:
-        relevant_news = get_relevant_news(query, news_data, top_k=top_k)
+    relevant_news = get_relevant_news(
+        query, news_data, llm,
+        top_k=top_k,
+        search_method=search_method,
+        alpha=alpha
+    )
 
     if not relevant_news:
         return {
             "answer": "관련 뉴스를 찾을 수 없습니다.",
-            "sources": []
+            "sources": [],
+            "search_method": search_method
         }
 
     # 2. 컨텍스트 포맷팅
@@ -372,19 +450,18 @@ def generate_rag_answer(query: str, news_data: list, llm, use_semantic: bool = F
 
     return {
         "answer": answer,
-        "sources": [(news.title, news.publisher, news.date) for news, _ in relevant_news]
+        "sources": [(news.title, news.publisher, news.date) for news, _ in relevant_news],
+        "search_method": search_method
     }
 
 
 # === LLM 클래스 ===
 def get_secret(key: str):
     """API 키를 가져옵니다. (환경변수 > Streamlit secrets)"""
-    # 환경변수 먼저 확인
     value = os.getenv(key)
     if value:
         return value
 
-    # Streamlit secrets 확인
     try:
         if hasattr(st, 'secrets') and key in st.secrets:
             return st.secrets[key]
@@ -414,7 +491,7 @@ class GeminiLLM:
 
 
 class OpenAILLM:
-    def __init__(self, model: str = "gpt-5-mini", embedding_model: str = "text-embedding-3-small"):
+    def __init__(self, model: str = "gpt-4o-mini", embedding_model: str = "text-embedding-3-small"):
         from openai import OpenAI
         api_key = get_secret("OPENAI_API_KEY")
         if not api_key:
@@ -456,10 +533,11 @@ BM25_B = 0.75          # BM25 파라미터
 # === 사이드바 ===
 with st.sidebar:
     st.header("📰 심리 뉴스 RAG")
+    st.caption("Hybrid Search 지원")
 
     st.divider()
 
-    # RAG 파라미터 표시 (참조용, 수정 불가)
+    # RAG 파라미터 표시
     with st.expander("⚙️ RAG 파라미터 (참조)", expanded=False):
         st.markdown(f"""
         | 파라미터 | 값 |
@@ -473,11 +551,9 @@ with st.sidebar:
     if st.button("🚀 데이터 로드", type="primary", use_container_width=True):
         with st.spinner("초기화 중..."):
             try:
-                # 데이터 로드 (1000개 고정)
                 news_data = load_news_data(max_items=MAX_NEWS_ITEMS)
                 st.session_state.news_data = news_data
 
-                # LLM 초기화
                 llm = create_llm()
                 st.session_state.llm = llm
 
@@ -489,15 +565,34 @@ with st.sidebar:
     st.divider()
 
     # 검색 방식 선택
+    st.subheader("🔍 검색 방식")
     search_method = st.radio(
-        "검색 방식",
-        ["BM25 (키워드)", "Semantic (임베딩)"],
-        index=0
+        "검색 알고리즘",
+        ["BM25", "Semantic", "Hybrid"],
+        index=0,
+        help="BM25: 키워드 기반, Semantic: 의미 기반, Hybrid: 둘의 조합"
     )
+    st.session_state.search_method = search_method
 
-    # 임베딩 생성 (Semantic Search용)
+    # Hybrid 검색 시 alpha 값 조절
+    if search_method == "Hybrid":
+        alpha = st.slider(
+            "Alpha (BM25 가중치)",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.5,
+            step=0.1,
+            help="1.0: BM25만, 0.0: Semantic만, 0.5: 균형"
+        )
+        st.session_state.hybrid_alpha = alpha
+        st.caption(f"📊 BM25: {alpha:.0%} / Semantic: {1-alpha:.0%}")
+
+    st.divider()
+
+    # 임베딩 생성 (Semantic/Hybrid용)
     if st.session_state.news_data and st.session_state.llm:
-        if search_method == "Semantic (임베딩)" and not st.session_state.embeddings_ready:
+        if search_method in ["Semantic", "Hybrid"] and not st.session_state.embeddings_ready:
+            st.warning("⚠️ 임베딩이 필요합니다.")
             if st.button("🧠 임베딩 생성", use_container_width=True):
                 with st.spinner("임베딩 생성 중..."):
                     progress = st.progress(0)
@@ -525,10 +620,17 @@ with st.sidebar:
 
 
 # === 메인 영역 ===
-st.title("📰 RAG 챗봇 - 심리 뉴스")
+st.title("📰 RAG 챗봇 - Hybrid Search")
 
 st.markdown("""
 심리 관련 뉴스 데이터를 기반으로 질문에 답변합니다.
+
+#### 🔍 검색 방식 비교:
+| 방식 | 장점 | 단점 |
+|------|------|------|
+| **BM25** | 정확한 키워드 매칭, 빠름 | 동의어/유사어 인식 못함 |
+| **Semantic** | 의미적 유사성 파악 | 키워드 정확도 낮음, 느림 |
+| **Hybrid** | 두 장점 결합 | 파라미터 튜닝 필요 |
 
 **예시 질문:**
 - "정신건강 관련 최신 뉴스는?"
@@ -548,9 +650,13 @@ else:
         for i, news in enumerate(st.session_state.news_data[:5]):
             st.markdown(f"**{i+1}. {news.title}**")
             st.caption(f"{news.publisher} | {news.date}")
-            st.markdown(f"📄 **본문:**")
-            st.write(news.content)
+            st.write(news.content[:200] + "...")
             st.divider()
+
+    # 현재 검색 방식 표시
+    method_emoji = {"BM25": "🔤", "Semantic": "🧠", "Hybrid": "⚡"}
+    alpha_info = f" (Alpha: {st.session_state.hybrid_alpha})" if st.session_state.search_method == "Hybrid" else ""
+    st.info(f"{method_emoji.get(st.session_state.search_method, '')} 현재 검색 방식: **{st.session_state.search_method}**{alpha_info}")
 
     # 대화 기록 표시 (스크롤 가능한 컨테이너)
     chat_container = st.container(height=500)
@@ -559,7 +665,7 @@ else:
             with st.chat_message(msg["role"], avatar=msg.get("avatar")):
                 st.markdown(msg["content"])
                 if msg.get("sources"):
-                    with st.expander("📚 참조 뉴스"):
+                    with st.expander(f"📚 참조 뉴스 ({msg.get('search_method', 'N/A')})"):
                         for title, publisher, date in msg["sources"]:
                             st.markdown(f"**{title}** ({publisher}, {date})")
 
@@ -567,34 +673,36 @@ else:
         if st.session_state.pending_response:
             last_user_input = st.session_state.messages[-1]["content"]
             with st.chat_message("assistant", avatar=AVATAR_BOT):
-                with st.spinner("답변 생성 중..."):
+                with st.spinner(f"답변 생성 중... ({st.session_state.search_method})"):
                     try:
-                        use_semantic = (search_method == "Semantic (임베딩)" and st.session_state.embeddings_ready)
-
                         result = generate_rag_answer(
                             last_user_input,
                             st.session_state.news_data,
                             st.session_state.llm,
-                            use_semantic=use_semantic,
+                            search_method=st.session_state.search_method,
+                            alpha=st.session_state.hybrid_alpha,
                             top_k=TOP_K_RESULTS
                         )
                         response = result["answer"]
                         sources = result["sources"]
+                        used_method = result.get("search_method", st.session_state.search_method)
 
                     except Exception as e:
                         response = f"⚠️ 오류: {str(e)}"
                         sources = []
+                        used_method = st.session_state.search_method
 
             st.session_state.messages.append({
                 "role": "assistant",
                 "content": response,
                 "avatar": AVATAR_BOT,
-                "sources": sources
+                "sources": sources,
+                "search_method": used_method
             })
             st.session_state.pending_response = False
             st.rerun()
 
-    # 자동 스크롤 (새 메시지 입력 시)
+    # 자동 스크롤
     if st.session_state.messages:
         st.components.v1.html(
             """
@@ -620,3 +728,4 @@ else:
         })
         st.session_state.pending_response = True
         st.rerun()
+
